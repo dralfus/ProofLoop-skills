@@ -1,0 +1,16 @@
+# Локальное состояние Codex и временные результаты
+.tmp/
+.codex/
+dist/
+
+# Среды и кэши
+.venv/
+__pycache__/
+*.py[cod]
+
+# IDE и ОС
+.vs/
+.idea/
+*.user
+Thumbs.db
+Desktop.ini

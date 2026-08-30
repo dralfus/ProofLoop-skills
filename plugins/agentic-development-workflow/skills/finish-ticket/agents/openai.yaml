@@ -1,0 +1,6 @@
+interface:
+  display_name: "Контроллер agentic ticket"
+  short_description: "Ticket с независимой приёмкой и budget gates"
+  default_prompt: "Используй $finish-ticket для выполнения указанного ticket."
+policy:
+  allow_implicit_invocation: false
