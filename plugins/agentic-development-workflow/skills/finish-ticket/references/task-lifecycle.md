@@ -1,6 +1,6 @@
 # Протокол выполнения одного ticket
 
-Версия workflow: `1.6`
+Версия workflow: `1.7`
 
 Это единственный обязательный runtime-протокол skill `finish-ticket`.
 Копии этого файла в проекте не требуются.
@@ -49,7 +49,9 @@
 3. Связать каждый acceptance criterion с наблюдаемым evidence.
 4. Для каждого критерия заполнить `SEAM_FEASIBILITY`: production entry point,
    существующий или явно утверждённый test seam, red-capable команда и граница
-   ownership. Критерий без всех четырёх полей не готов к implementation.
+   ownership. Если критерий добавляет или меняет injectable boundary, также
+   перечислить production-shaped consumer и его compatibility command.
+   Критерий без применимых полей не готов к implementation.
 5. Отделить implementation requirement от `NEW_REQUIREMENT` и `DESIGN_GAP`.
 6. Объявить planned-модели/effort следующих допустимых ролей и причины выбора,
    даже если design gate пока запрещает их spawn.
@@ -78,9 +80,9 @@
 | Stop gates / design gaps | `<условия; нет или список>` |
 | Next action | `<spawn, confirmation или BLOCKED_FOR_DESIGN>` |
 
-| Criterion | Production seam | Test seam / RED command | Owner | Status |
-|---|---|---|---|---|
-| `<criterion>` | `<entry point>` | `<injected seam; command>` | `<owner>` | `READY` или `DESIGN_GAP` |
+| Criterion | Production seam | Test seam / RED command | Production consumer / compatibility command | Owner | Status |
+|---|---|---|---|---|---|
+| `<criterion>` | `<entry point>` | `<injected seam; command>` | `<consumer; command>` или `N/A — boundary unchanged` | `<owner>` | `READY` или `DESIGN_GAP` |
 
 Для `critical`, resumed/partial, design gap или `BASELINE_INCOMPLETE` Controller
 останавливается и запрашивает подтверждение до первого agent spawn. Для
@@ -185,7 +187,8 @@ production diff не менялся, повтор перед commit не вып�
 ## Основной цикл
 
 1. Создать одного Implementer с `IMPLEMENTATION_PACKET`: baseline, только
-   применимые acceptance criteria, `SEAM_FEASIBILITY`, разрешённый scope,
+   применимые acceptance criteria, `SEAM_FEASIBILITY`, включая production
+   consumer/compatibility command для изменённой injectable boundary, разрешённый scope,
    targeted RED/GREEN commands, stop gates и открытые findings. Это единственный
    handoff; transcript Controller, неприменимые части spec и повторное чтение
    неизменённых входных документов не передаются. Дополнительный файл допустим
@@ -197,8 +200,10 @@ production diff не менялся, повтор перед commit не вып�
    реализует минимальное изменение и подтверждает GREEN. Full suite не
    запускает без специальной проектной необходимости.
 3. Создать одного свежего Reviewer. Он проверяет fixed-point diff по осям
-   `SPEC` и `CODE_QUALITY`, не изменяет файлы, не создаёт agents и не запускает
-   full suite.
+   `SPEC` и `CODE_QUALITY`, включая compatibility evidence каждого
+   production-shaped consumer изменённой injectable boundary. Evidence только
+   через fake/injected seam без такого consumer даёт `REGRESSION` и `FAIL`.
+   Reviewer не изменяет файлы, не создаёт agents и не запускает full suite.
 4. При любом `FAIL` не запускать Verifier. Классифицировать findings и провести
    adjudication.
 5. Только после `SPEC: PASS` и `CODE_QUALITY: PASS` создать Verifier.
@@ -206,7 +211,8 @@ production diff не менялся, повтор перед commit не вып�
    необходимости и обязательные live-проверки. Отсутствующую проверку отмечает
    `NOT_RUN` с причиной.
 7. При `ACCEPTED` Controller сохраняет evidence и присваивает `DONE`.
-8. При `REJECTED` разрешён только scoped fix подтверждённого требования.
+8. При `REJECTED` Controller публикует `FAILURE_SUMMARY`; разрешён только
+   scoped fix подтверждённого требования.
 
 ## Findings и repair-loop
 
@@ -286,6 +292,21 @@ Full suite: <команда, started/finished, exit code, counts или обос
 Live evidence: <сценарий и результат либо NOT_RUN>
 Непроверенные риски: <список>
 ```
+
+После `REJECTED` Controller добавляет к Verifier verdict:
+
+```text
+FAILURE_SUMMARY
+PRIMARY_FAILURE: <одна нормализованная корневая причина или UNKNOWN>
+CASCADE_FAILURES: <точное число тестовых падений, вызванных primary failure, или UNKNOWN>
+IN_SCOPE: <yes|no|unknown; краткое основание>
+NEXT_LOOP: <bounded repair с focused command | BLOCKED_FOR_DESIGN | user decision>
+```
+
+`CASCADE_FAILURES` не является числом всех failed tests: в него входят только
+падения, для которых Verifier установил одну primary cause. При `UNKNOWN`
+Controller не придумывает grouping и не расходует новый implementation budget
+до создания red-capable focused loop.
 
 ## Token usage report
 

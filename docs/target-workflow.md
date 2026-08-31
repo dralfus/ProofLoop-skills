@@ -9,6 +9,8 @@ PREFLIGHT: RISK + SCOPE + STOP CONDITIONS
     ↓
 SEAM FEASIBILITY: ENTRY POINT + TEST SEAM + RED COMMAND + OWNER
     ↓
+CHANGED BOUNDARY: PRODUCTION CONSUMER + COMPATIBILITY COMMAND
+    ↓
 PRE-FLIGHT BUDGET + CONTEXT GATE
     ↓
 IMPLEMENTER + TARGETED RED/GREEN
@@ -62,6 +64,8 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
   full suite и context compaction.
 - До Implementer каждый acceptance criterion имеет production entry point,
   test seam, red-capable command и owner; иначе ticket блокируется для design.
+- Изменённая injectable boundary дополнительно имеет production-shaped consumer
+  и compatibility command; fake seam сам по себе не является достаточным evidence.
 - Role-agent получает один компактный `IMPLEMENTATION_PACKET`, а не историю
   Controller или полную спецификацию.
 - Обычный ticket имеет бюджет трёх role-agent запусков; критичный — четырёх.
@@ -71,10 +75,12 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
 - `DONE` требует независимого evidence по каждому acceptance criterion.
 - После terminal status или `REJECTED` Controller показывает observed tokens
   Implementer и total ticket; неизвестные provider counters не оцениваются.
+- После `REJECTED` Controller отделяет `PRIMARY_FAILURE` от подтверждённых
+  `CASCADE_FAILURES` и назначает один focused next loop либо design stop.
 
 ## Следующий эксперимент
 
 Установить plugin `agentic-development-workflow` и применить workflow версии
-`1.6` к одному реальному ticket без workflow-файлов в проекте. До реализации
+`1.7` к одному реальному ticket без workflow-файлов в проекте. До реализации
 зафиксировать risk, ожидаемый file scope и stop conditions; после завершения
 сравнить число запусков, тестов, исправлений и расхода контекста с ticket 353.

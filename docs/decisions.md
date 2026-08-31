@@ -175,3 +175,28 @@ baseline 353 или заметить, где расходуются tokens.
 Критерий успеха: каждый новый preflight имеет две таблицы, а пользователь может
 найти baseline, budget, next action и status каждого criterion без чтения
 свободного текста.
+
+## D011 — Проверять production consumer изменённой injectable boundary
+
+Статус: принято 2026-08-31.
+
+Наблюдаемый failure: в ticket 363 deterministic clipboard matrix прошла через
+fake boundary, но reference-composer с production clipboard boundary завершался
+`capture_failed`. Full suite показал 12 failures, которые являлись каскадом
+одной primary причины; scoped evidence и Reviewer PASS не доказали consumer
+compatibility.
+
+Решение:
+
+1. Если acceptance criterion добавляет или меняет injectable boundary,
+   `SEAM_FEASIBILITY` называет production-shaped consumer и запускаемую
+   compatibility command.
+2. `IMPLEMENTATION_PACKET` передаёт этот consumer Implementer, а Reviewer
+   возвращает `FAIL`, если evidence ограничено fake/injected seam.
+3. После Verifier `REJECTED` Controller публикует `FAILURE_SUMMARY` с одной
+   нормализованной primary cause, только подтверждёнными cascade failures,
+   in-scope verdict и одним focused next loop.
+
+Критерий успеха: на следующем ticket с изменённой injectable boundary до
+Implementer есть consumer command, а любой full-suite failure отчётно отделяет
+одну установленную root cause от каскада и не запускает широкий diagnostic loop.

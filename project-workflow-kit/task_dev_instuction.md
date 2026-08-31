@@ -1,6 +1,6 @@
 # Как выполнить одну задачу разработки
 
-Версия workflow: `1.6`
+Версия workflow: `1.7`
 
 ## Один раз на каждом ПК
 
@@ -33,7 +33,8 @@ ticket и спецификацию, а полный workflow загрузит и
 
 Controller сначала вернёт `PREFLIGHT_REPORT` с acceptance evidence,
 `SEAM_FEASIBILITY` каждого критерия (production entry point, test seam, RED
-command и owner), риском, scope, моделями/effort, budget/context counters и
+command и owner), а для изменённой injectable boundary — production consumer и
+compatibility command; риском, scope, моделями/effort, budget/context counters и
 stop gates. Для critical,
 resumed, design-gap и неизвестного scope разрешите первый spawn явно. Ordinary
 ticket продолжает сам в своём budget.

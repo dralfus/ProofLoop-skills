@@ -27,6 +27,8 @@ description: Использовать для реализации или воз�
    бюджете.
 7. Передавать role-agent только `IMPLEMENTATION_PACKET` из протокола; до
    Implementer каждый acceptance criterion обязан иметь `SEAM_FEASIBILITY`.
+   Изменённая injectable boundary дополнительно требует named
+   production-shaped consumer и compatibility command.
 
 Проектные инструкции определяют команды, архитектуру и coding standards.
 Протокол skill определяет полномочия ролей, порядок приёмки, health gates и
@@ -57,6 +59,8 @@ description: Использовать для реализации или воз�
 - После closure Controller публикует observed `TOKEN_USAGE`: отдельно
   Implementer/follow-ups и total ticket; недоступные provider counters помечает
   `NOT_AVAILABLE`.
+- После `REJECTED` Controller публикует `FAILURE_SUMMARY`: primary cause,
+  известное число cascade failures, in-scope verdict и следующий bounded loop.
 - Один процессный skill на роль: Implementer использует TDD либо диагностику;
   Reviewer не оркестрирует; Verifier подтверждает evidence.
 

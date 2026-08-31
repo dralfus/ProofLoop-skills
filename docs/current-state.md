@@ -65,9 +65,21 @@ injected test seam, которых нет в исходном production path. �
 дорогого запуска. Следующий протоколный gate должен останавливать такой ticket
 до Implementer, а не добавлять ещё один review.
 
+## Наблюдаемый failure mode 4: fake seam без production consumer evidence
+
+Ticket 363 в CodexRedactionGate прошёл scoped matrix с deterministic clipboard
+boundary, но full suite показал `capture_failed` в reference-composer, который
+использует production clipboard boundary. Несколько reference и product-smoke
+failures были каскадом одной причины, а не независимыми дефектами.
+
+Следующий протокольный gate требует для изменённой injectable boundary один
+production-shaped consumer и его compatibility command до Implementer;
+Reviewer проверяет это evidence до Verifier. При `REJECTED` Controller
+группирует только установленный primary failure и его cascade failures.
+
 ## Текущая цель
 
-Проверить глобальный plugin и протокол версии `1.6` на следующем реальном
+Проверить глобальный plugin и протокол версии `1.7` на следующем реальном
 ticket без копирования workflow-файлов в проект и измерить:
 
 - число role-agent запусков;
