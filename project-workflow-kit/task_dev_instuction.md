@@ -1,6 +1,6 @@
 # Как выполнить одну задачу разработки
 
-Версия workflow: `1.4`
+Версия workflow: `1.6`
 
 ## Один раз на каждом ПК
 
@@ -38,6 +38,10 @@ stop gates. Для critical,
 resumed, design-gap и неизвестного scope разрешите первый spawn явно. Ordinary
 ticket продолжает сам в своём budget.
 
+Controller показывает этот отчёт двумя компактными Markdown-таблицами: summary
+ticket/baseline/risk/scope/budget и по одной строке `SEAM_FEASIBILITY` на
+criterion.
+
 По умолчанию budget: ordinary — 3 role-agent запуска; critical — 4; full suite
 — 1. Terra `high` является базой критичной реализации. Sol `high` Controller
 может выбрать лишь с записанной причиной; превышение budget создаёт checkpoint
@@ -55,6 +59,11 @@ Controller. Если criterion требует external state, но owner или 
   отсутствующее design-решение.
 - `BLOCKED`: сохранить тип задачи, причину блокировки, тесты, findings,
   попытки и следующий диагностический шаг для общей статистики.
+
+После `DONE`, `REJECTED`, `BLOCKED_FOR_DESIGN`, `BLOCKED` или `BUDGET_GATE`
+Controller печатает `TOKEN_USAGE`: observed tokens Implementer/follow-ups и
+total ticket. Если Codex не раскрыл счётчики, отчёт содержит `NOT_AVAILABLE`,
+а не оценку.
 
 ## Возобновление
 

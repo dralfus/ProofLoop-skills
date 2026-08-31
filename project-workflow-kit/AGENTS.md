@@ -1,6 +1,6 @@
 # Устаревший переносимый файл
 
-Начиная с workflow `1.4` этот файл не копируется в проекты.
+Начиная с workflow `1.6` этот файл не копируется в проекты.
 
 Проект сохраняет собственный `AGENTS.md`. Общие роли, acceptance authority и
 health gates загружаются из plugin `agentic-development-workflow` и skill

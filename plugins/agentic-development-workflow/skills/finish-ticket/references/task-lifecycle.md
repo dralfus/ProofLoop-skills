@@ -1,6 +1,6 @@
 # Протокол выполнения одного ticket
 
-Версия workflow: `1.4`
+Версия workflow: `1.6`
 
 Это единственный обязательный runtime-протокол skill `finish-ticket`.
 Копии этого файла в проекте не требуются.
@@ -16,6 +16,7 @@
 - Findings и repair-loop
 - Возобновление
 - Контракты отчётов
+- Token usage report
 - Финальное evidence
 
 ## Роли и полномочия
@@ -60,27 +61,26 @@
 10. При возобновлении сопоставить checkpoint с текущим partial diff и отметить
    устаревшее evidence.
 
-Формат:
+Формат: Controller выводит заголовок `PREFLIGHT_REPORT`, затем две Markdown
+таблицы. В ячейках — короткие фразы, без повторения ticket/spec и без
+многострочных escape-последовательностей.
 
-```text
-PREFLIGHT_REPORT
-Ticket и spec: <пути>
-Project root: <путь>
-Baseline: <ветка, commit или другой fixed point>
-Acceptance: <критерий -> evidence>
-SEAM_FEASIBILITY: <критерий -> production entry point; test seam; RED command;
-owner; READY|DESIGN_GAP>
-Сложность и риск: <оценка и причины>
-Маршрутизация: <следующая допустимая роль -> модель, effort, причина; spawn
-пока запрещён, если действует gate>
-Budget: <ordinary|critical; role-agent: 0/N; Sol: 0/N; full suite: 0/1;
-compaction: 0/N; правило эскалации>
-Ожидаемый scope: <компоненты, верхняя граница файлов, исключения>
-Feedback loop: <targeted tests и команды>
-Stop gates: <условия>
-Design gaps: <нет или список>
-Следующее действие: <spawn либо BLOCKED_FOR_DESIGN>
-```
+| Блок | Значение |
+|---|---|
+| Ticket / spec | `<пути или идентификаторы>` |
+| Project / baseline | `<root; ветка и commit или manifest>` |
+| Acceptance | `<краткие criteria -> evidence>` |
+| Risk | `<сложность; факторы>` |
+| Scope | `<компоненты; лимит файлов; исключения>` |
+| Feedback loop | `<targeted RED/GREEN command>` |
+| Routing | `<следующая роль; model/effort; причина>` |
+| Budget | `<class; role-agent N/M; Sol N/M; suite N/1; compaction N/M>` |
+| Stop gates / design gaps | `<условия; нет или список>` |
+| Next action | `<spawn, confirmation или BLOCKED_FOR_DESIGN>` |
+
+| Criterion | Production seam | Test seam / RED command | Owner | Status |
+|---|---|---|---|---|
+| `<criterion>` | `<entry point>` | `<injected seam; command>` | `<owner>` | `READY` или `DESIGN_GAP` |
 
 Для `critical`, resumed/partial, design gap или `BASELINE_INCOMPLETE` Controller
 останавливается и запрашивает подтверждение до первого agent spawn. Для
@@ -240,7 +240,8 @@ owner, один production-seam bypass повторился, требуется 
 1. Не считать прерванного агента завершившим работу и не откатывать
    пользовательские изменения.
 2. Зафиксировать current diff, изменённые файлы, RED/GREEN состояние,
-   незавершённые проверки, budget counters и последнее достоверное evidence.
+   незавершённые проверки, budget counters, последний `TOKEN_USAGE` и последнее
+   достоверное evidence.
 3. Проверить stop gates до нового spawn.
 4. При design gap остановиться; при утверждённом design и прежнем scope
    передать свежему Implementer только компактный handoff.
@@ -286,12 +287,38 @@ Live evidence: <сценарий и результат либо NOT_RUN>
 Непроверенные риски: <список>
 ```
 
+## Token usage report
+
+После каждого `DONE`, `BLOCKED_FOR_DESIGN`, `BLOCKED`, `BUDGET_GATE` и
+Verifier verdict `REJECTED` Controller публикует `TOKEN_USAGE`. Он получает
+значения только из доступного Codex task/role-agent usage или execution trace;
+не оценивает и не выводит вымышленные токены. Отчёт не создаёт новую роль и не
+задерживает status.
+
+```text
+TOKEN_USAGE
+Статус: <DONE|REJECTED|BLOCKED_FOR_DESIGN|BLOCKED|BUDGET_GATE>
+Источник: <usage/execution trace|NOT_AVAILABLE>
+Implementation: <Implementer и follow-ups: input, cached input, output,
+reasoning или NOT_AVAILABLE>
+Acceptance/control: <Controller, Reviewer, Verifier по ролям или NOT_AVAILABLE>
+Ticket total: <input, cached input, output, reasoning или NOT_AVAILABLE>
+Coverage: <COMPLETE|PARTIAL|NOT_AVAILABLE>
+Отсутствующие значения: <список|нет>
+```
+
+`COMPLETE` означает, что суммарные значения построены из observed counters
+каждой запущенной роли и Controller. Если provider не раскрывает часть или все
+счётчики, использовать `PARTIAL` либо `NOT_AVAILABLE`; это не повод заменять
+цифры оценкой.
+
 ## Финальное evidence
 
 Controller сохраняет project/ticket ID, baseline и итоговый diff, acceptance
 evidence, команды и exit codes, тесты Implementer, модели/effort, findings и
 adjudication, число fix-раундов, сработавшие stop gates, live/NOT_RUN проверки,
 budget counters, compaction/checkpoint и итоговый статус.
+К каждой закрытой или отклонённой попытке также сохраняется `TOKEN_USAGE`.
 
 `DONE` разрешён только при независимых `SPEC: PASS`, `CODE_QUALITY: PASS` и
 достаточном `ACCEPTED` evidence по каждому acceptance criterion.

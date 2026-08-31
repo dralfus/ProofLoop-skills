@@ -4,7 +4,7 @@
 
 - plugin находится в `plugins/agentic-development-workflow/`;
 - marketplace описан в `.agents/plugins/marketplace.json`;
-- executable protocol имеет версию `1.4.0`;
+- executable protocol имеет версию `1.6.0`;
 - локальное состояние, временные файлы и старые ZIP исключены из Git;
 - GitHub Actions валидирует manifest и обязательные файлы plugin.
 
@@ -20,7 +20,7 @@
 ```powershell
 git branch -M main
 git add .
-git commit -m "feat: publish agentic development workflow 1.4"
+git commit -m "feat: publish agentic development workflow 1.6"
 git remote add origin https://github.com/dralfus/ProofLoop-skills.git
 git push -u origin main
 ```

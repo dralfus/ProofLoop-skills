@@ -140,3 +140,38 @@ acceptance criterion. Агент мог потратить implementation-рау
 acceptance criteria есть четыре поля feasibility; если хотя бы одного нет,
 зафиксирован `BLOCKED_FOR_DESIGN` с нулём implementation launches. При scoped
 fix фактические launches не превышают 4 без явного разрешения.
+
+## D009 — Публиковать observed token usage при closure
+
+Статус: принято 2026-08-31.
+
+Наблюдаемый failure: budget задаёт максимальное число запусков, но после
+успешного либо неуспешного ticket пользователь не получает сопоставимой
+фактической стоимости реализации. Это не позволяет сравнить experiment с
+baseline 353 или заметить, где расходуются tokens.
+
+Решение: Controller после `DONE`, `REJECTED`, `BLOCKED_FOR_DESIGN`, `BLOCKED`
+и `BUDGET_GATE` выводит стандартный `TOKEN_USAGE`. Он отделяет Implementer и
+его follow-ups от acceptance/control ролей и total ticket, использует только
+наблюдаемые provider counters или execution trace и явно маркирует пробелы
+как `PARTIAL`/`NOT_AVAILABLE`.
+
+Критерий успеха: каждый следующий закрытый или отклонённый ticket имеет один
+отчёт с observed implementation tokens и total ticket либо честный
+`NOT_AVAILABLE`; в отчёте нет оценочных чисел.
+
+## D010 — Представлять preflight как компактные таблицы
+
+Статус: принято 2026-08-31.
+
+Наблюдаемый failure: линейный `PREFLIGHT_REPORT` содержит все нужные поля, но
+смешивает baseline, acceptance, feasibility и budget в один длинный абзац.
+Пользователь не может быстро проверить scope и stop gates до дорогого spawn.
+
+Решение: обязательный preflight рендерится двумя Markdown-таблицами: summary и
+одна строка feasibility на criterion. В ячейках используются короткие фразы;
+все прежние обязательные поля сохраняются.
+
+Критерий успеха: каждый новый preflight имеет две таблицы, а пользователь может
+найти baseline, budget, next action и status каждого criterion без чтения
+свободного текста.

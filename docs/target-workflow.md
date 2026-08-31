@@ -28,6 +28,8 @@ TARGETED ACCEPTANCE + ONE FULL SUITE + LIVE EVIDENCE
     ↓
 ACCEPTED / REJECTED
     ↓
+TOKEN USAGE REPORT
+    ↓
 DONE / SCOPED FIX / BLOCKED
 ```
 
@@ -67,10 +69,12 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
 - Sol `high` не является default для критичного ticket: его используют после
   измеримого недостатка Terra либо для design-adjudication.
 - `DONE` требует независимого evidence по каждому acceptance criterion.
+- После terminal status или `REJECTED` Controller показывает observed tokens
+  Implementer и total ticket; неизвестные provider counters не оцениваются.
 
 ## Следующий эксперимент
 
 Установить plugin `agentic-development-workflow` и применить workflow версии
-`1.4` к одному реальному ticket без workflow-файлов в проекте. До реализации
+`1.6` к одному реальному ticket без workflow-файлов в проекте. До реализации
 зафиксировать risk, ожидаемый file scope и stop conditions; после завершения
 сравнить число запусков, тестов, исправлений и расхода контекста с ticket 353.

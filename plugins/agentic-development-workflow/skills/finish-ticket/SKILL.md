@@ -54,6 +54,9 @@ description: Использовать для реализации или воз�
 - `DONE` требует независимого исполняемого evidence.
 - Повтор корневой причины, design gap, превышение scope, бюджета или контекста
   включает stop gate.
+- После closure Controller публикует observed `TOKEN_USAGE`: отдельно
+  Implementer/follow-ups и total ticket; недоступные provider counters помечает
+  `NOT_AVAILABLE`.
 - Один процессный skill на роль: Implementer использует TDD либо диагностику;
   Reviewer не оркестрирует; Verifier подтверждает evidence.
 

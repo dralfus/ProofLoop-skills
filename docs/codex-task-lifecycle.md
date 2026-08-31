@@ -1,6 +1,6 @@
 # Жизненный цикл задач Codex
 
-Версия workflow: `1.4`
+Версия workflow: `1.6`
 
 ## Источник истины
 
@@ -65,6 +65,10 @@ targeted feedback loop, stop gates, design gaps и budget/context counters. Дл
 design-gap или неизвестного scope он ждёт подтверждения пользователя. Ordinary
 ticket продолжает в опубликованном бюджете.
 
+`PREFLIGHT_REPORT` выводится двумя Markdown-таблицами: первая — ticket,
+baseline, risk, scope, budget и next action; вторая — по одному row на
+acceptance criterion с production seam, test/RED seam, owner и status.
+
 Обычный ticket имеет 3 role-agent запуска, critical — 4; максимум 1 full suite.
 После `Reviewer FAIL` Verifier ещё не запущен: один scoped fix использует
 follow-up Implementer, scoped re-review и затем Verifier в тех же четырёх
@@ -78,3 +82,8 @@ Sol `high` допускается только по записанной при�
 `ACCEPTED`. Для следующего ticket можно оставить тот же Controller, пока его
 контекст не смешивает состояния задач. Role-agent tasks после фиксации evidence
 можно архивировать.
+
+После `DONE`, `REJECTED`, `BLOCKED_FOR_DESIGN`, `BLOCKED` или `BUDGET_GATE`
+Controller обязан показать `TOKEN_USAGE`: отдельно Implementer/follow-ups,
+Controller/Reviewer/Verifier и total ticket. Используются только фактические
+usage/trace counters; недоступные значения отмечаются `NOT_AVAILABLE`.
