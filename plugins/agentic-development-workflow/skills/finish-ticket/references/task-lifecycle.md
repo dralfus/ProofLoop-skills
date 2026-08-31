@@ -1,6 +1,6 @@
 # Протокол выполнения одного ticket
 
-Версия workflow: `1.7`
+Версия workflow: `1.8`
 
 Это единственный обязательный runtime-протокол skill `finish-ticket`.
 Копии этого файла в проекте не требуются.
@@ -63,26 +63,30 @@
 10. При возобновлении сопоставить checkpoint с текущим partial diff и отметить
    устаревшее evidence.
 
-Формат: Controller выводит заголовок `PREFLIGHT_REPORT`, затем две Markdown
-таблицы. В ячейках — короткие фразы, без повторения ticket/spec и без
-многострочных escape-последовательностей.
+## User-facing PREFLIGHT_REPORT
+
+Controller сначала выполняет все десять preflight-проверок, но пользователю
+выводит только decision receipt. Детали baseline, acceptance mapping, scope,
+`SEAM_FEASIBILITY` и targeted commands сохраняются в рабочем preflight record,
+`IMPLEMENTATION_PACKET` и final evidence; не печатать их в обычном отчёте.
+
+Формат: заголовок `PREFLIGHT_REPORT`, затем одна Markdown-таблица. В ячейках —
+короткие фразы, без повторения ticket/spec и без многострочных
+escape-последовательностей.
 
 | Блок | Значение |
 |---|---|
 | Ticket / spec | `<пути или идентификаторы>` |
-| Project / baseline | `<root; ветка и commit или manifest>` |
-| Acceptance | `<краткие criteria -> evidence>` |
 | Risk | `<сложность; факторы>` |
-| Scope | `<компоненты; лимит файлов; исключения>` |
-| Feedback loop | `<targeted RED/GREEN command>` |
 | Routing | `<следующая роль; model/effort; причина>` |
 | Budget | `<class; role-agent N/M; Sol N/M; suite N/1; compaction N/M>` |
 | Stop gates / design gaps | `<условия; нет или список>` |
 | Next action | `<spawn, confirmation или BLOCKED_FOR_DESIGN>` |
 
-| Criterion | Production seam | Test seam / RED command | Production consumer / compatibility command | Owner | Status |
-|---|---|---|---|---|---|
-| `<criterion>` | `<entry point>` | `<injected seam; command>` | `<consumer; command>` или `N/A — boundary unchanged` | `<owner>` | `READY` или `DESIGN_GAP` |
+Если есть `DESIGN_GAP`, `BASELINE_INCOMPLETE` или другой stop gate, после
+таблицы вывести только одну строку `Blocking detail: <criterion/condition; что
+нужно для продолжения>`. Не выводить полную criterion table, если она не
+блокирует решение пользователя.
 
 Для `critical`, resumed/partial, design gap или `BASELINE_INCOMPLETE` Controller
 останавливается и запрашивает подтверждение до первого agent spawn. Для

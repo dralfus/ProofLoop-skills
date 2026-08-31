@@ -219,3 +219,21 @@ read-only audit с ограниченным числом запусков, ст�
 каждый `CONSOLIDATE_CANDIDATE` имеет сохранённый риск/seam и проверяемую
 replacement command; при отсутствии этого evidence выводится
 `NO_CHANGE_RECOMMENDED` или `MEASUREMENT_INCOMPLETE`.
+
+## D013 — Выводить пользователю только preflight decision receipt
+
+Статус: принято 2026-08-31.
+
+Наблюдаемый failure: Controller обязан собирать baseline, scope, acceptance и
+feasibility, но печать всех этих данных в каждом первом сообщении создаёт
+длинный отчёт, который труднее прочитать и который расходует context/output
+tokens без изменения пользовательского решения.
+
+Решение: `PREFLIGHT_REPORT` показывает шесть полей: Ticket/spec, Risk,
+Routing, Budget, Stop gates/design gaps и Next action. Полный preflight record,
+`SEAM_FEASIBILITY`, targeted commands и scope остаются обязательными внутренними
+данными `IMPLEMENTATION_PACKET` и final evidence. При stop gate Controller
+добавляет только один blocking detail.
+
+Критерий успеха: следующий preflight даёт пользователю одно короткое решение
+без потери обязательных feasibility данных для Implementer, Reviewer и Verifier.

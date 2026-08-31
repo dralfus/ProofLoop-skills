@@ -22,6 +22,8 @@ description: Использовать для реализации или воз�
 4. Если ticket не определён однозначно, вернуть `NEEDS_CLARIFICATION` и
    запросить только его путь или идентификатор.
 5. Выполнить `PREFLIGHT_REPORT` и budget/context gate из протокола.
+   Пользователю выводить только decision receipt; полные feasibility детали
+   оставить в `IMPLEMENTATION_PACKET` и evidence.
 6. Для critical, resumed, design-gap или неопределённого scope остановиться до
    подтверждения пользователя; ordinary ticket продолжить в объявленном
    бюджете.

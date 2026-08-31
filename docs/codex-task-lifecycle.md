@@ -1,6 +1,6 @@
 # Жизненный цикл задач Codex
 
-Версия workflow: `1.7`
+Версия workflow: `1.8`
 
 ## Источник истины
 
@@ -66,11 +66,11 @@ targeted feedback loop, stop gates, design gaps и budget/context counters. Дл
 design-gap или неизвестного scope он ждёт подтверждения пользователя. Ordinary
 ticket продолжает в опубликованном бюджете.
 
-`PREFLIGHT_REPORT` выводится двумя Markdown-таблицами: первая — ticket,
-baseline, risk, scope, budget и next action; вторая — по одному row на
-acceptance criterion с production seam, test/RED seam, production consumer/
-compatibility command, owner и status. Evidence только с fake seam не достаточно
-для изменённой boundary.
+`PREFLIGHT_REPORT` выводится одной короткой Markdown-таблицей: ticket/spec,
+risk, routing, budget, stop gates/design gaps и next action. Полные baseline,
+acceptance, scope и feasibility данные остаются в `IMPLEMENTATION_PACKET` и
+evidence; при stop gate показывается только блокирующий criterion. Evidence
+только с fake seam не достаточно для изменённой boundary.
 
 Обычный ticket имеет 3 role-agent запуска, critical — 4; максимум 1 full suite.
 После `Reviewer FAIL` Verifier ещё не запущен: один scoped fix использует

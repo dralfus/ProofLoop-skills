@@ -77,9 +77,20 @@ production-shaped consumer и его compatibility command до Implementer;
 Reviewer проверяет это evidence до Verifier. При `REJECTED` Controller
 группирует только установленный primary failure и его cascade failures.
 
+## Наблюдаемый failure mode 5: verbose preflight расходует контекст пользователя
+
+Полный preflight нужен Controller для безопасного routing, но печать baseline,
+scope, acceptance и feasibility каждого criterion в каждом чате делает первый
+ответ длинным и отвлекает от решения пользователя: продолжать, подтвердить или
+остановить ticket.
+
+User-facing отчёт теперь оставляет только ticket/spec, risk, routing, budget,
+stop gates/design gaps и next action. Детали сохраняются в packet/evidence и
+показываются только как один blocking detail при реальном stop gate.
+
 ## Текущая цель
 
-Проверить глобальный plugin и протокол версии `1.7` на следующем реальном
+Проверить глобальный plugin и протокол версии `1.8` на следующем реальном
 ticket без копирования workflow-файлов в проект и измерить:
 
 - число role-agent запусков;

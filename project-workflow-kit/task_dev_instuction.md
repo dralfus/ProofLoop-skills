@@ -1,6 +1,6 @@
 # Как выполнить одну задачу разработки
 
-Версия workflow: `1.7`
+Версия workflow: `1.8`
 
 ## Один раз на каждом ПК
 
@@ -31,17 +31,14 @@ ticket и спецификацию, а полный workflow загрузит и
 
 ## Контрольная точка перед разработкой
 
-Controller сначала вернёт `PREFLIGHT_REPORT` с acceptance evidence,
-`SEAM_FEASIBILITY` каждого критерия (production entry point, test seam, RED
-command и owner), а для изменённой injectable boundary — production consumer и
-compatibility command; риском, scope, моделями/effort, budget/context counters и
-stop gates. Для critical,
+Controller сначала вернёт короткий `PREFLIGHT_REPORT`: ticket/spec, risk,
+routing, budget, stop gates/design gaps и next action. Полные acceptance,
+`SEAM_FEASIBILITY`, scope и commands остаются в handoff/evidence. Для critical,
 resumed, design-gap и неизвестного scope разрешите первый spawn явно. Ordinary
 ticket продолжает сам в своём budget.
 
-Controller показывает этот отчёт двумя компактными Markdown-таблицами: summary
-ticket/baseline/risk/scope/budget и по одной строке `SEAM_FEASIBILITY` на
-criterion.
+Controller показывает этот отчёт одной компактной Markdown-таблицей. Если
+есть stop gate, он добавляет одну blocking detail строку.
 
 По умолчанию budget: ordinary — 3 role-agent запуска; critical — 4; full suite
 — 1. Terra `high` является базой критичной реализации. Sol `high` Controller

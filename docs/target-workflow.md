@@ -66,6 +66,8 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
   test seam, red-capable command и owner; иначе ticket блокируется для design.
 - Изменённая injectable boundary дополнительно имеет production-shaped consumer
   и compatibility command; fake seam сам по себе не является достаточным evidence.
+- User-facing `PREFLIGHT_REPORT` содержит только decision receipt; полные
+  feasibility details остаются в packet/evidence и выводятся лишь при stop gate.
 - Role-agent получает один компактный `IMPLEMENTATION_PACKET`, а не историю
   Controller или полную спецификацию.
 - Обычный ticket имеет бюджет трёх role-agent запусков; критичный — четырёх.
@@ -81,6 +83,6 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
 ## Следующий эксперимент
 
 Установить plugin `agentic-development-workflow` и применить workflow версии
-`1.7` к одному реальному ticket без workflow-файлов в проекте. До реализации
+`1.8` к одному реальному ticket без workflow-файлов в проекте. До реализации
 зафиксировать risk, ожидаемый file scope и stop conditions; после завершения
 сравнить число запусков, тестов, исправлений и расхода контекста с ticket 353.
