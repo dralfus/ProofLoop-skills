@@ -1,6 +1,6 @@
 # Как выполнить одну задачу разработки
 
-Версия workflow: `1.3`
+Версия workflow: `1.4`
 
 ## Один раз на каждом ПК
 
@@ -31,8 +31,10 @@ ticket и спецификацию, а полный workflow загрузит и
 
 ## Контрольная точка перед разработкой
 
-Controller сначала вернёт `PREFLIGHT_REPORT` с acceptance evidence, риском,
-scope, моделями/effort, budget/context counters и stop gates. Для critical,
+Controller сначала вернёт `PREFLIGHT_REPORT` с acceptance evidence,
+`SEAM_FEASIBILITY` каждого критерия (production entry point, test seam, RED
+command и owner), риском, scope, моделями/effort, budget/context counters и
+stop gates. Для critical,
 resumed, design-gap и неизвестного scope разрешите первый spawn явно. Ordinary
 ticket продолжает сам в своём budget.
 
@@ -40,6 +42,10 @@ ticket продолжает сам в своём budget.
 — 1. Terra `high` является базой критичной реализации. Sol `high` Controller
 может выбрать лишь с записанной причиной; превышение budget создаёт checkpoint
 и ждёт нового решения.
+
+Implementer получает один компактный `IMPLEMENTATION_PACKET`, а не историю
+Controller. Если criterion требует external state, но owner или injected seam
+не доказаны, Controller возвращает `BLOCKED_FOR_DESIGN` до первого writer.
 
 ## После завершения
 

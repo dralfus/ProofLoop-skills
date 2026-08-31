@@ -1,6 +1,6 @@
 # Жизненный цикл задач Codex
 
-Версия workflow: `1.3`
+Версия workflow: `1.4`
 
 ## Источник истины
 
@@ -59,12 +59,16 @@ codex plugin add agentic-development-workflow@personal
 ## Контроль перед расходом лимита
 
 До первого role-agent Controller обязан показать `PREFLIGHT_REPORT`: baseline,
-acceptance evidence, риск, модели/effort, ожидаемый scope, targeted feedback
-loop, stop gates, design gaps и budget/context counters. Для critical, resumed,
+acceptance evidence, `SEAM_FEASIBILITY` каждого критерия (production entry
+point, test seam, RED command, owner), риск, модели/effort, ожидаемый scope,
+targeted feedback loop, stop gates, design gaps и budget/context counters. Для critical, resumed,
 design-gap или неизвестного scope он ждёт подтверждения пользователя. Ordinary
 ticket продолжает в опубликованном бюджете.
 
 Обычный ticket имеет 3 role-agent запуска, critical — 4; максимум 1 full suite.
+После `Reviewer FAIL` Verifier ещё не запущен: один scoped fix использует
+follow-up Implementer, scoped re-review и затем Verifier в тех же четырёх
+critical launches. Role-agent получает только компактный implementation packet.
 Sol `high` допускается только по записанной причине. Превышение любого лимита
 создаёт checkpoint и требует нового явного разрешения.
 

@@ -7,6 +7,8 @@ ACCEPTANCE CONTRACT
     ↓
 PREFLIGHT: RISK + SCOPE + STOP CONDITIONS
     ↓
+SEAM FEASIBILITY: ENTRY POINT + TEST SEAM + RED COMMAND + OWNER
+    ↓
 PRE-FLIGHT BUDGET + CONTEXT GATE
     ↓
 IMPLEMENTER + TARGETED RED/GREEN
@@ -56,6 +58,10 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
 - Раунды 3–5 требуют явного разрешения пользователя.
 - До первого spawn определяются лимиты role-agent запусков, Sol-эскалаций,
   full suite и context compaction.
+- До Implementer каждый acceptance criterion имеет production entry point,
+  test seam, red-capable command и owner; иначе ticket блокируется для design.
+- Role-agent получает один компактный `IMPLEMENTATION_PACKET`, а не историю
+  Controller или полную спецификацию.
 - Обычный ticket имеет бюджет трёх role-agent запусков; критичный — четырёх.
   Продолжение сверх него — новое явное решение пользователя и checkpoint.
 - Sol `high` не является default для критичного ticket: его используют после
@@ -65,6 +71,6 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
 ## Следующий эксперимент
 
 Установить plugin `agentic-development-workflow` и применить workflow версии
-`1.3` к одному реальному ticket без workflow-файлов в проекте. До реализации
+`1.4` к одному реальному ticket без workflow-файлов в проекте. До реализации
 зафиксировать risk, ожидаемый file scope и stop conditions; после завершения
 сравнить число запусков, тестов, исправлений и расхода контекста с ticket 353.

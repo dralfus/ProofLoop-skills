@@ -111,3 +111,32 @@ role-agent, 2 context compaction и значительного повторно�
 Критерий успеха: следующий критичный ticket сохраняет независимые review и
 verification, но не превышает preflight-бюджет без явного решения пользователя;
 в отчёте объяснён каждый дорогой запуск.
+
+## D008 — Проверять feasibility production/test seam до Implementer
+
+Статус: принято 2026-08-31.
+
+Наблюдаемый failure: ticket 363 требует полного clipboard snapshot/restore и
+детерминированной injected STA/clipboard matrix. Доступный production code
+сохраняет snapshot только для text/UnicodeText и очищает non-text clipboard;
+при этом исходный preflight не требовал показать owner и test seam для каждого
+acceptance criterion. Агент мог потратить implementation-раунд на выяснение
+архитектуры вместо ранней остановки.
+
+Решение:
+
+1. В `PREFLIGHT_REPORT` добавить обязательный `SEAM_FEASIBILITY` для каждого
+   критерия: production entry point, test seam, red-capable command и owner.
+2. Отсутствие любого поля или external state без owner/injected boundary даёт
+   `BLOCKED_FOR_DESIGN` до Implementer.
+3. Implementer получает один компактный `IMPLEMENTATION_PACKET`, а не
+   transcript Controller и полную spec; дополнительное чтение ограничено
+   прямыми dependencies указанного entry point.
+4. Уточнить accounting critical budget после review failure: re-review и
+   Verifier занимают два последних launches, так как до статического PASS
+   Verifier не запускался.
+
+Критерий успеха: на следующем critical ticket до первого role-agent для 100%
+acceptance criteria есть четыре поля feasibility; если хотя бы одного нет,
+зафиксирован `BLOCKED_FOR_DESIGN` с нулём implementation launches. При scoped
+fix фактические launches не превышают 4 без явного разрешения.

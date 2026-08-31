@@ -1,6 +1,6 @@
 # Протокол выполнения одного ticket
 
-Версия workflow: `1.3`
+Версия workflow: `1.4`
 
 Это единственный обязательный runtime-протокол skill `finish-ticket`.
 Копии этого файла в проекте не требуются.
@@ -46,15 +46,18 @@
    Если scope ещё неизвестен или превышает предел, зафиксировать hashes входных
    документов и `BASELINE_INCOMPLETE`, затем остановиться до уточнения scope.
 3. Связать каждый acceptance criterion с наблюдаемым evidence.
-4. Отделить implementation requirement от `NEW_REQUIREMENT` и `DESIGN_GAP`.
-5. Объявить planned-модели/effort следующих допустимых ролей и причины выбора,
+4. Для каждого критерия заполнить `SEAM_FEASIBILITY`: production entry point,
+   существующий или явно утверждённый test seam, red-capable команда и граница
+   ownership. Критерий без всех четырёх полей не готов к implementation.
+5. Отделить implementation requirement от `NEW_REQUIREMENT` и `DESIGN_GAP`.
+6. Объявить planned-модели/effort следующих допустимых ролей и причины выбора,
    даже если design gate пока запрещает их spawn.
-6. Объявить ожидаемые компоненты, верхнюю границу изменяемых файлов и
+7. Объявить ожидаемые компоненты, верхнюю границу изменяемых файлов и
    запрещённые соседние подсистемы.
-7. Объявить targeted RED/GREEN loop, команды review/verification и stop gates.
-8. Зафиксировать budget: тип ticket, максимум и текущий счётчик role-agent
+8. Объявить targeted RED/GREEN loop, команды review/verification и stop gates.
+9. Зафиксировать budget: тип ticket, максимум и текущий счётчик role-agent
    запусков, Sol, full suite и compaction; также правило эскалации модели.
-9. При возобновлении сопоставить checkpoint с текущим partial diff и отметить
+10. При возобновлении сопоставить checkpoint с текущим partial diff и отметить
    устаревшее evidence.
 
 Формат:
@@ -65,6 +68,8 @@ Ticket и spec: <пути>
 Project root: <путь>
 Baseline: <ветка, commit или другой fixed point>
 Acceptance: <критерий -> evidence>
+SEAM_FEASIBILITY: <критерий -> production entry point; test seam; RED command;
+owner; READY|DESIGN_GAP>
 Сложность и риск: <оценка и причины>
 Маршрутизация: <следующая допустимая роль -> модель, effort, причина; spawn
 пока запрещён, если действует gate>
@@ -91,6 +96,8 @@ ordinary ticket отчёт является объявленным планом:
 - поведение уже начатого необратимого side effect;
 - неизвестную security boundary;
 - новый production seam без доказуемого test seam.
+- критерий требует захватить, изменить или восстановить external state, но
+  operation owner либо injectable boundary не определены.
 - ticket предполагает существующий компонент, но он отсутствует, а создание и
   структура нового компонента не утверждены спецификацией.
 
@@ -153,9 +160,12 @@ Budget: <role-agent N/M; Sol N/M; full suite N/1; compaction N/M>
 | Critical | 4 | 1 | 1 | 1 |
 
 Запуск означает создание нового role-agent, а не follow-up уже созданному
-Implementer. Базовый critical план — Implementer, Reviewer, Verifier; четвёртый
-запуск зарезервирован для одного независимого re-review после scoped fix.
-Controller не расходует резерв заранее.
+Implementer. Для первого прохода critical ticket использует Implementer,
+Reviewer и Verifier. Если Reviewer вернул FAIL, Verifier ещё не запускался:
+допустимая последовательность одного scoped fix — Implementer (follow-up),
+scoped re-review, затем Verifier. Так total остаётся равен четырём launches;
+Controller не резервирует одновременно отдельные места и для re-review, и для
+повторного Verifier.
 
 Перед каждым spawn Controller показывает текущий счётчик. При достижении
 лимита он сохраняет checkpoint и возвращает `BUDGET_GATE`; новый spawn возможен
@@ -174,8 +184,12 @@ production diff не менялся, повтор перед commit не вып�
 
 ## Основной цикл
 
-1. Создать одного Implementer с минимальным handoff: ticket/spec, baseline,
-   разрешённый scope, acceptance criteria, targeted commands и stop gates.
+1. Создать одного Implementer с `IMPLEMENTATION_PACKET`: baseline, только
+   применимые acceptance criteria, `SEAM_FEASIBILITY`, разрешённый scope,
+   targeted RED/GREEN commands, stop gates и открытые findings. Это единственный
+   handoff; transcript Controller, неприменимые части spec и повторное чтение
+   неизменённых входных документов не передаются. Дополнительный файл допустим
+   лишь как прямая dependency указанного production entry point.
    Для implementation использовать ровно один процессный путь: TDD для новой
    функции либо диагностику для уже наблюдаемого defect; не загружать оба без
    подтверждённой необходимости.

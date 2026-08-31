@@ -25,7 +25,8 @@ description: Использовать для реализации или воз�
 6. Для critical, resumed, design-gap или неопределённого scope остановиться до
    подтверждения пользователя; ordinary ticket продолжить в объявленном
    бюджете.
-7. Передавать role-agent только компактный handoff из протокола.
+7. Передавать role-agent только `IMPLEMENTATION_PACKET` из протокола; до
+   Implementer каждый acceptance criterion обязан иметь `SEAM_FEASIBILITY`.
 
 Проектные инструкции определяют команды, архитектуру и coding standards.
 Протокол skill определяет полномочия ролей, порядок приёмки, health gates и
