@@ -1,0 +1,6 @@
+interface:
+  display_name: "Аудит test suite"
+  short_description: "Ручной evidence-аудит тестов"
+  default_prompt: "Используй $audit-test-suite для измерительного аудита test suite этого проекта."
+policy:
+  allow_implicit_invocation: false

@@ -35,7 +35,7 @@ OpenSpec пока не входит в стандартный workflow.
 - `docs/codex-task-lifecycle.md` — описание запуска и сопровождения протокола;
 - `docs/decisions.md` — принятые архитектурные решения;
 - `plugins/agentic-development-workflow/` — устанавливаемый Codex plugin с
-  skill и единственным исполняемым протоколом;
+  `finish-ticket` и manual-only `audit-test-suite` skills;
 - `project-workflow-kit/task_dev_instuction.md` — инструкция человеку без
   копирования workflow-файлов в проекты.
 
@@ -61,6 +61,12 @@ installer больше не являются штатным способом у�
 
 Skill читает протокол из собственного глобального каталога. В проекте нужны
 только его обычные инструкции, ticket, спецификация и код.
+
+Для разового read-only аудита тестов, который не вызывается автоматически:
+
+```text
+Используй $audit-test-suite для измерительного аудита test suite этого проекта.
+```
 
 ## Лицензия
 

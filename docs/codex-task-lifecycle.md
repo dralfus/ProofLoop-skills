@@ -92,3 +92,10 @@ Controller/Reviewer/Verifier и total ticket. Используются толь�
 usage/trace counters; недоступные значения отмечаются `NOT_AVAILABLE`.
 После `REJECTED` он также показывает `FAILURE_SUMMARY`: primary failure,
 подтверждённые cascade failures, in-scope verdict и следующий focused loop.
+
+## Ручной аудит test suite
+
+`$audit-test-suite` вызывается только явным пользовательским prompt и не
+участвует в обычном lifecycle ticket. Он измеряет duration и flaky evidence,
+строит карту `test -> risk -> seam` и готовит proposals с replacement proof.
+Он не удаляет тесты, не меняет CI/quarantine и не создаёт agents.

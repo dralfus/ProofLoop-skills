@@ -66,6 +66,17 @@ Controller печатает `TOKEN_USAGE`: observed tokens Implementer/follow-up
 total ticket. Если Codex не раскрыл счётчики, отчёт содержит `NOT_AVAILABLE`,
 а не оценку.
 
+## Разовый аудит test suite
+
+Для ручного read-only аудита используйте отдельный prompt:
+
+```text
+Используй $audit-test-suite для измерительного аудита test suite этого проекта.
+```
+
+Этот skill не запускается автоматически и не удаляет/пропускает тесты: он
+сначала строит карту `test -> risk -> seam` и выдаёт proposals с replacement proof.
+
 ## Возобновление
 
 ```text

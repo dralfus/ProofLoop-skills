@@ -200,3 +200,22 @@ compatibility.
 Критерий успеха: на следующем ticket с изменённой injectable boundary до
 Implementer есть consumer command, а любой full-suite failure отчётно отделяет
 одну установленную root cause от каскада и не запускает широкий diagnostic loop.
+
+## D012 — Измерять test suite до его оптимизации
+
+Статус: принято 2026-08-31.
+
+Наблюдаемый риск: большое количество тестов само по себе может ошибочно
+восприниматься как дефект. Удаление или quarantine по счётчику способно убрать
+security или production-consumer evidence; при этом без duration, flaky history
+и карты `test -> risk -> seam` нельзя доказать реальную стоимость или дубли.
+
+Решение: plugin поставляет отдельный manual-only `$audit-test-suite`. Он делает
+read-only audit с ограниченным числом запусков, строит evidence map и выдаёт
+только proposals с replacement proof. Skill не меняет тесты, CI или quarantine;
+изменения выполняются отдельным ticket либо отдельной явно одобренной правкой.
+
+Критерий успеха: audit любого проекта завершается baseline и evidence map, а
+каждый `CONSOLIDATE_CANDIDATE` имеет сохранённый риск/seam и проверяемую
+replacement command; при отсутствии этого evidence выводится
+`NO_CHANGE_RECOMMENDED` или `MEASUREMENT_INCOMPLETE`.

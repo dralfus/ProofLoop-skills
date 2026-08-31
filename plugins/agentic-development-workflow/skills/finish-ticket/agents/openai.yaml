@@ -1,5 +1,5 @@
 interface:
-  display_name: "Контроллер agentic ticket"
+  display_name: "finish-ticket"
   short_description: "Ticket с независимой приёмкой и budget gates"
   default_prompt: "Используй $finish-ticket для выполнения указанного ticket."
 policy:
