@@ -1,0 +1,4 @@
+{
+  "capabilities": {"runtime": {"provider": "qwen", "product": "qwen-code", "version": "0.22.2"}, "configured_model": {"id": "qwen3-coder-plus"}, "active_model": {"id": "qwen3-coder-plus"}, "role_model_identity_lock": true, "fresh_named_subagent": true, "implementer_continuation": true, "reviewer_policy": {"fresh_named": true, "fork": false, "write": false, "tool_classes": ["read", "verify"]}, "verification_command": "python -m unittest", "observed_usage": false},
+  "ledger": [{"event": "baseline", "sequence": 1, "fixed_point": "abc123", "open_findings": [{"fingerprint": "F-13", "type": "QUALITY_BLOCKER", "root_cause": "missing-order"}]}, {"event": "repair_candidate_reviewed", "sequence": 3, "finding": {"fingerprint": "F-13", "type": "QUALITY_BLOCKER", "root_cause": "missing-order"}, "reviewer_verdict": {"closed_finding_fingerprints": ["F-13"]}, "decision": "CONTINUE"}]
+}

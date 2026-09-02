@@ -66,8 +66,15 @@ description: Использовать для реализации или воз�
 - Один процессный skill на роль: Implementer использует TDD либо диагностику;
   Reviewer не оркестрирует; Verifier подтверждает evidence.
 
-## Установка
+## Установка и Qwen Code
 
 Skill устанавливается вместе с plugin `agentic-development-workflow` через
 Codex marketplace. Инструкции для человека находятся в репозитории plugin, а
 не в проекте разработки.
+
+Qwen Code v0.22.2 устанавливает extension из корня того же repository:
+`qwen extensions install .`. Он публикует этот же skill и Qwen Controller
+agent; canonical lifecycle остаётся только в `references/task-lifecycle.md`.
+Короткий Qwen запуск: `/finish-ticket ticket <ID или путь>`. До role dispatch
+Controller применяет exact Qwen capability preflight, затем
+`QWEN_CONVERGENT`, а не Codex numeric repair cap.

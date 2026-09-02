@@ -1,0 +1,13 @@
+{
+  "capabilities": {
+    "runtime": {"provider": "qwen", "product": "qwen-code", "version": "0.22.2"},
+    "configured_model": {"id": "qwen3-coder-plus"},
+    "active_model": {"id": "qwen3-coder-plus"},
+    "role_model_identity_lock": true,
+    "fresh_named_subagent": false,
+    "implementer_continuation": false,
+    "reviewer_policy": {"fresh_named": true, "fork": false, "write": false, "tool_classes": ["read", "verify"]},
+    "verification_command": "python -m unittest",
+    "observed_usage": false
+  }
+}

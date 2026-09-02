@@ -1,0 +1,22 @@
+{
+  "capabilities": {
+    "model_identity": {
+      "provider": "openai",
+      "source": "codex-runtime",
+      "models": [
+        {"id": "efficient-current", "tier": "efficient", "efforts": ["medium", "high"]},
+        {"id": "standard-current", "tier": "standard", "efforts": ["medium", "high"]}
+      ]
+    },
+    "role_dispatch_and_continuation": true,
+    "tool_policy": true,
+    "observed_usage": true
+  },
+  "expected": {
+    "profile": "CODEX_PROFILE",
+    "budget": {
+      "ordinary": {"role_agents": 3, "frontier": 0, "full_suite": 1, "compaction": 0},
+      "critical": {"role_agents": 4, "frontier": 1, "full_suite": 1, "compaction": 1}
+    }
+  }
+}

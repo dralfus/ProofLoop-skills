@@ -1,0 +1,7 @@
+{
+  "operation": "local_attempt",
+  "ticket_status": "IMPLEMENTING",
+  "capabilities": {"runtime": {"provider": "qwen", "product": "qwen-code", "version": "0.22.2"}, "configured_model": {"id": "qwen3-coder-plus"}, "active_model": {"id": "qwen3-coder-plus"}, "role_model_identity_lock": true, "fresh_named_subagent": true, "implementer_continuation": true, "reviewer_policy": {"fresh_named": true, "fork": false, "write": false, "tool_classes": ["read", "verify"]}, "verification_command": "python -m unittest", "observed_usage": false},
+  "ledger": [{"event": "baseline", "sequence": 1, "fixed_point": "abc123", "open_findings": [{"fingerprint": "F-LOCAL", "type": "SPEC_VIOLATION", "root_cause": "missing-guard"}]}],
+  "attempt": {"finding": {"fingerprint": "F-LOCAL", "type": "SPEC_VIOLATION", "root_cause": "missing-guard"}, "red_evidence": {"command": "python -m unittest tests.test_guard", "result": "RED"}, "hypothesis": "Guard input.", "green_evidence": [{"command": "python -m unittest tests.test_guard", "result": "GREEN"}]}
+}

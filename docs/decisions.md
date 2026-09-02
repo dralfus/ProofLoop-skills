@@ -237,3 +237,135 @@ Routing, Budget, Stop gates/design gaps и Next action. Полный preflight r
 
 Критерий успеха: следующий preflight даёт пользователю одно короткое решение
 без потери обязательных feasibility данных для Implementer, Reviewer и Verifier.
+
+## D014 — Блокировать lifecycle при отсутствии runtime capability
+
+Статус: принято 2026-09-01.
+
+Наблюдаемый failure: lifecycle предполагал возможности Codex неявно. Runtime
+без role dispatch, корректной identity модели, tool policy или observed usage
+мог перейти к self-review либо silent fallback и выдать evidence, которое не
+соответствует фактическому host.
+
+Решение: канонический protocol вводит декларативный runtime adapter contract с
+capability preflight. Отсутствующая обязательная capability возвращает
+`BLOCKED_CAPABILITY` до первого role-agent launch, без fallback. Codex profile
+принимает проверяемый inventory `id/tier/efforts`: resolver выбирает requested
+tier и effort, затем при необходимости строго понижает `frontier -> standard
+-> efficient` только к совместимому effort. Он сохраняет requested/selected
+tier, degraded flag и reason. Неизвестный inventory либо отсутствие совместимой
+пары тоже возвращает `BLOCKED_CAPABILITY`; Luna, Terra и Sol остаются примерами
+registry, не workflow logic. Численные лимиты сохраняются: role-agent 3/4,
+frontier 0/1, full suite 1 и compaction 0/1. CI запускает внешний validator и
+executable fixture, которые подтверждают contract установленного plugin.
+
+Для Codex trusted provenance является минимальным exact contract:
+`provider: openai` и `source: codex-runtime`. Структурно валидный inventory с
+другим или отсутствующим provenance возвращает `BLOCKED_CAPABILITY` до routing.
+
+Критерий успеха: fixture с отсутствующим role dispatch, недоверенным inventory
+или несовместимым effort возвращает `BLOCKED_CAPABILITY`; arbitrary inventory
+выбирается по tier, а frontier request деградирует к standard с записанной
+причиной. Valid plugin подтверждает protocol 1.10; ни один runtime без
+обязательной capability не начинает role-agent dispatch.
+
+## D015 — Ввести Qwen Code preflight как contract fixture
+
+Статус: принято 2026-09-01.
+
+Наблюдаемый failure: Codex adaptive profile предполагает inventory, dispatch
+и tool policy, которых Qwen Code нельзя считать доступными по имени модели.
+Без проверки exact runtime version, одной configured identity и независимого
+read-only Reviewer Controller мог бы начать недоказуемый lifecycle или
+подменить независимую приёмку self-review.
+
+Решение: protocol и executable validator выбирают Qwen только по trusted
+declaration `provider: qwen`, `product: qwen-code`, `version: 0.22.2`.
+Preflight требует совпадения configured/active model ID, fresh named subagent,
+`role_model_identity_lock` для всех ролей, continuation исходного Implementer,
+fresh named Reviewer с `fork: false`,
+`write: false` и read-only tools, а также executable verification command.
+Отсутствие или нарушение возвращает `BLOCKED_CAPABILITY`. Успех сохраняет
+одну identity для всех ролей и `usage: AVAILABLE|NOT_AVAILABLE`.
+
+Boolean capability принимает только literal `true`. Verification command
+принимается только как непустая строка либо object
+`{"argv": ["<non-empty argument>", "..."]}`; truthy surrogate, пустая
+строка, пустой `argv` и лишние fields блокируются как malformed capability.
+
+Минимальное изменение не добавляет Qwen packaging и unlimited convergence
+repair-loop: fixture возвращает `repair_policy: NOT_IMPLEMENTED`; эти policy
+и delivery остаются отдельными tickets.
+
+Критерий успеха: fixture для Qwen v0.22.2 выбирает single-model profile и
+возвращает configuration/usage; fixture с fork/write Reviewer, изменённой
+active identity либо отсутствующими dispatch/continuation/verification
+capabilities возвращает `BLOCKED_CAPABILITY`. Codex fixture и его numeric
+budget остаются без изменений.
+
+## D016 — Сходящийся Qwen repair-loop через append-only ledger
+
+Статус: принято 2026-09-01.
+
+Наблюдаемый failure: D015 доказывает лишь preflight. Если после него снять
+numeric fix cap Qwen без external evidence, одна model identity способна
+повторять self-repair и принять неподтверждённый progress. Если сохранить
+Codex numeric cap, полезный локальный Qwen repair обрывается по счётчику, а не
+по состоянию finding.
+
+Решение: Qwen использует `QWEN_CONVERGENT` без числового лимита repair-раундов.
+Ledger имеет формальную append-only event-схему: `baseline` содержит fixed point
+и open findings; `local_attempt` — finding, reproducible RED, hypothesis и
+GREEN; `repair_candidate` — diff/scope, sequence references, normalized root
+cause, точно соответствующую referenced attempts, и runtime/model/usage trace;
+`review_verdict` — fresh read-only Reviewer,
+static verdicts, regression/scope flags и closed findings; `terminal` — status
+и reason. Controller валидирует всю историю, а не последнюю запись:
+каждый historical `CONTINUE` обязан иметь полный attempt/candidate/review
+chain. Closed findings должны быть уникальным подмножеством current open
+findings и findings referenced attempts; extra, invented или повторное closure
+блокирует progression. Non-`CONTINUE` verdict требует terminal event, а после
+terminal события запрещены. Controller продолжает только после закрытия
+известного open finding при `SPEC: PASS`, `CODE_QUALITY: PASS`, отсутствии
+regression accepted criteria и unapproved scope. Repeated normalized type/root
+cause без нового reproducible RED даёт
+`BLOCKED`; `NEW_REQUIREMENT`, `DESIGN_GAP` и unapproved scope дают
+`BLOCKED_FOR_DESIGN`; regression также запрещает automatic continuation.
+Codex budget policy не меняется; Qwen packaging был намеренно отложен до
+отдельного delivery решения D017.
+
+Критерий успеха: внешний JSON fixture доказывает `CONTINUE` для независимого
+progress, append-only `local_attempt` без изменения ticket status, точные
+attempt references candidate и terminal reason. Validator отклоняет
+empty/incomplete/invalid-sequence ledger, invented/extra/repeated closure и
+historical `CONTINUE` без полного evidence, а также repeated normalized root
+cause без RED, regression, новое требование, design gap и scope expansion. В
+profile нет numeric repair cap.
+
+## D017 — Поставлять Qwen как native extension без второй lifecycle-копии
+
+Статус: принято 2026-09-02.
+
+Наблюдаемый failure: D015/D016 задавали безопасную Qwen policy, но без
+discoverable delivery wrapper Qwen пользователь не мог коротко вызвать тот же
+workflow. Копирование protocol в Qwen skill создало бы drift и расходящиеся
+acceptance rules.
+
+Решение: корневой `qwen-extension.json` публикует существующий каталог skills
+Codex plugin и Qwen-compatible named agent `finish-ticket-controller`. Agent
+с `model: inherit` читает единственный canonical lifecycle по пути
+`plugins/agentic-development-workflow/skills/finish-ticket/references/task-lifecycle.md`.
+Qwen запускается `/finish-ticket ticket <ID или путь>`; exact capability
+preflight и `QWEN_CONVERGENT` сохраняются. Validator проверяет manifest,
+skill/agent discovery path, reference на canonical lifecycle и отсутствие
+Qwen-копии protocol. Сквозные fixtures отдельно подтверждают неизменный Codex
+budget, Qwen preflight, convergence без numeric cap, `BLOCKED_CAPABILITY` и
+terminal regression evidence.
+
+Реальный pilot не подменяется fixture: пока `qwen` CLI отсутствует, evidence
+artifact содержит `QWEN_CLI=ABSENT` и `NOT_RUN`, а документация описывает
+воспроизводимую процедуру будущего запуска.
+
+Критерий успеха: `python scripts/validate_plugin.py --qwen-extension-root .`
+и bundled tests проходят; installed extension показывает `finish-ticket` и
+`finish-ticket-controller`, а canonical lifecycle существует в одном месте.

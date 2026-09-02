@@ -1,6 +1,6 @@
 # Жизненный цикл задач Codex
 
-Версия workflow: `1.8`
+Версия workflow: `1.11`
 
 ## Источник истины
 
@@ -24,6 +24,27 @@ codex plugin add agentic-development-workflow@personal
 На домашнем ПК достаточно clone того же GitHub-репозитория и этих двух команд.
 Для обновления pull обновлённый commit и повторите `codex plugin add`; после
 обновления откройте новый Codex task, чтобы он загрузил новую версию skill.
+
+## Установка и запуск в Qwen Code v0.22.2
+
+Из корня того же clone выполните:
+
+```powershell
+qwen extensions install .
+```
+
+Нативный manifest `qwen-extension.json` делает существующий `finish-ticket`
+skill discoverable и добавляет named agent `finish-ticket-controller`; это не
+вторая копия lifecycle. После установки проверьте `/skills` и `/agents manage`,
+затем запустите:
+
+```text
+/finish-ticket ticket <ID или путь>
+```
+
+Обновление локально установленного extension требует `qwen extensions update
+proofloop-skills`. Полная процедура первого real pilot и его текущий статус
+`NOT_RUN` описаны в `experiments/qwen-code-v0222-pilot.md`.
 
 ## Запуск одного ticket
 
@@ -56,6 +77,53 @@ codex plugin add agentic-development-workflow@personal
 В проект не добавляются `context.md`, `task-lifecycle.md` или копии
 `AGENTS.md` из workflow-репозитория.
 
+## Совместимость runtime adapter
+
+Перед preflight Controller запрашивает у runtime adapter обязательные
+capabilities: проверяемый inventory model ID/tier/effort, dispatch/continuation
+ролей, policy tools и observed usage. Если хотя бы одной нет, ticket получает
+`BLOCKED_CAPABILITY` до spawn; Controller не подменяет её fallback или
+самопроверкой. Codex принимает inventory только с provenance `provider: openai`
+и `source: codex-runtime`, иначе также блокирует ticket. Затем выбирает tier `efficient`, `standard` или `frontier` по
+протоколу, записывает requested/selected tier и degradation reason; Luna,
+Terra и Sol — лишь примеры текущего registry, не правило маршрутизации.
+
+Qwen Code v0.22.2 проходит отдельный fixture preflight только при exact
+declaration `provider: qwen`, `product: qwen-code`, `version: 0.22.2`.
+Configured и active model IDs должны совпадать и role model identity lock
+должен применяться ко всем ролям; также обязательны fresh named subagent,
+continuation исходного Implementer, fresh read-only Reviewer без
+fork/write и executable verification command. Любое отсутствие даёт
+`BLOCKED_CAPABILITY`. Успех фиксирует одну verified identity для всех ролей и
+`usage: AVAILABLE|NOT_AVAILABLE`.
+
+Qwen использует `QWEN_CONVERGENT`, а не числовой cap repair-раундов. Ledger
+начинается с baseline/fixed point/open findings. Каждый `local_attempt` хранит
+finding, RED, hypothesis и GREEN, не меняя ticket status; `repair_candidate`
+содержит diff/scope, sequence references, normalized root cause и
+runtime/model/usage trace; `review_verdict` содержит fresh read-only Reviewer,
+static verdicts, regression/scope flags и closures; terminal event — причину.
+Normalized root cause candidate точно совпадает с root cause referenced
+attempts. Перед
+продолжением Controller валидирует всю history `CONTINUE`: closures должны быть
+уникальным подмножеством current open findings и referenced attempts, без
+invented/repeated closure. `CONTINUE` требует `SPEC: PASS` и `CODE_QUALITY:
+PASS`, без regression accepted criteria и unapproved scope.
+Повтор root cause без нового reproducible RED даёт
+`REPEATED_ROOT_CAUSE_WITHOUT_NEW_RED`; `NEW_REQUIREMENT`, `DESIGN_GAP` или
+scope expansion дают stop gate. Qwen delivery extension не меняет эти common
+gates, Codex profile или его numeric budget.
+
+Перед продолжением Qwen Controller сверяет *все* historical candidate traces с
+configured model identity; несовпадение даёт `MODEL_IDENTITY_MISMATCH`.
+Любой policy `BLOCKED` после valid baseline оставляет append-only terminal event
+с непустой причиной, включая `INSUFFICIENT_REPAIR_EVIDENCE`.
+
+Boolean capability в Qwen declaration должна быть literal `true`; строковый
+или иной truthy surrogate блокируется. Verification command — только
+непустая строка либо object `{"argv": ["<non-empty argument>", "..."]}`;
+пустой/неструктурный command также блокируется.
+
 ## Контроль перед расходом лимита
 
 До первого role-agent Controller обязан показать `PREFLIGHT_REPORT`: baseline,
@@ -76,7 +144,7 @@ evidence; при stop gate показывается только блокиру�
 После `Reviewer FAIL` Verifier ещё не запущен: один scoped fix использует
 follow-up Implementer, scoped re-review и затем Verifier в тех же четырёх
 critical launches. Role-agent получает только компактный implementation packet.
-Sol `high` допускается только по записанной причине. Превышение любого лимита
+Frontier `high` допускается только по записанной причине. Превышение любого лимита
 создаёт checkpoint и требует нового явного разрешения.
 
 ## Завершение и следующая задача

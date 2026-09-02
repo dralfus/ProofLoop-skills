@@ -1,0 +1,7 @@
+{
+  "name": "proofloop-skills",
+  "version": "1.11.0",
+  "contextFileName": "QWEN.md",
+  "skills": "plugins/agentic-development-workflow/skills",
+  "agents": "qwen-code/agents"
+}

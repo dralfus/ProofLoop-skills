@@ -4,7 +4,7 @@
 
 - plugin находится в `plugins/agentic-development-workflow/`;
 - marketplace описан в `.agents/plugins/marketplace.json`;
-- plugin `agentic-development-workflow` имеет версию `1.9.0`;
+- plugin `agentic-development-workflow` имеет версию `1.11.0`;
 - локальное состояние, временные файлы и старые ZIP исключены из Git;
 - GitHub Actions валидирует manifest и обязательные файлы plugin.
 
@@ -20,7 +20,7 @@
 ```powershell
 git branch -M main
 git add .
-git commit -m "feat: publish agentic development workflow 1.9"
+git commit -m "feat: publish agentic development workflow 1.11"
 git remote add origin https://github.com/dralfus/ProofLoop-skills.git
 git push -u origin main
 ```
@@ -37,6 +37,17 @@ codex plugin add agentic-development-workflow@personal
 После обновления репозитория повторите последнюю команду и начните новый Codex
 task. Для plugin из этого репозитория не требуется ZIP, PowerShell installer
 или копирование workflow-файлов в проект разработки.
+
+Для Qwen Code v0.22.2 из того же clone выполните:
+
+```powershell
+qwen extensions install .
+```
+
+Extension делает `finish-ticket` и `finish-ticket-controller` discoverable,
+используя единственный lifecycle из Codex plugin. Запуск: `/finish-ticket
+ticket <ID или путь>`. Перед публикацией сверяйте real-pilot evidence с
+`docs/experiments/qwen-code-v0222-pilot.md`; `NOT_RUN` не является live run.
 
 ## Граница ответственности
 

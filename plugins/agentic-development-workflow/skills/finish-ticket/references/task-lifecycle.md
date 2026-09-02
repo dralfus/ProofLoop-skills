@@ -1,6 +1,6 @@
 # Протокол выполнения одного ticket
 
-Версия workflow: `1.8`
+Версия workflow: `1.11`
 
 Это единственный обязательный runtime-протокол skill `finish-ticket`.
 Копии этого файла в проекте не требуются.
@@ -18,6 +18,135 @@
 - Контракты отчётов
 - Token usage report
 - Финальное evidence
+
+## Runtime adapter contract
+
+Runtime adapter предоставляет Controller только фактические возможности
+текущего host. До preflight он выполняет capability preflight и сообщает
+доступность всех обязательных возможностей: model identity, role dispatch and
+continuation, tool policy и observed usage. `model identity` включает точный
+provider/model ID, capability tier (`efficient`, `standard` или `frontier`) и
+поддерживаемый effort. Для Codex inventory имеет exact provenance
+`provider: openai` и `source: codex-runtime`; любой другой или отсутствующий
+marker считается недоверенным. `observed usage` — только counters,
+которые adapter реально получил от provider или execution trace.
+
+Если хотя бы одна обязательная возможность недоступна, Controller возвращает
+`BLOCKED_CAPABILITY` до первого role-agent launch. Нельзя заменять её fallback,
+самопроверкой Controller или новым role behavior. В report перечисляются
+отсутствующая capability и provider evidence.
+
+`role dispatch and continuation` означает, что Controller может создать
+разрешённую роль и отправить scoped follow-up исходному Implementer. `tool
+policy` перечисляет доступные каждой роли tool classes и запрещает adapter
+выдавать недоступный tool как доступный.
+
+### Codex adaptive profile
+
+Для Codex adapter сначала проверяет фактический inventory, затем выбирает
+минимально достаточные tier и effort по risk policy ниже. Для запроса
+`frontier` он детерминированно пробует `frontier`, затем `standard`, затем
+`efficient`; для `standard` — `standard`, затем `efficient`; для `efficient`
+только `efficient`. Каждый кандидат обязан поддерживать требуемый effort; при
+нескольких совместимых IDs выбирается лексикографически первый. В routing
+adapter записывает requested/selected tier, `degraded` и reason. Его numeric
+policy не меняется: ordinary ticket использует `role-agent 3/4` как лимиты
+ordinary/critical, `full suite 1` и `compaction 0/1`; frontier остаётся `0/1`
+без нового разрешения. Adapter передаёт выбранную model identity в preflight и
+observed usage в closure report.
+
+Внешняя policy fixture принимает declaration с четырьмя capabilities и
+проверяемым inventory model IDs/tiers/efforts. При полном Codex declaration
+она возвращает `CODEX_PROFILE` с Controller/Implementer/Reviewer/Verifier
+routing и этими budget. При неизвестном/недоверенном inventory (включая
+отсутствующий exact marker `codex-runtime`), `false` либо отсутствующей
+capability или отсутствии совместимой пары tier+effort результат — только
+`BLOCKED_CAPABILITY`; model-name guessing, fallback и self-review не
+допускаются.
+
+### Qwen Code v0.22.2 single-model profile (Qwen single-model profile)
+
+Qwen выбирается не по имени модели, а только из trusted runtime declaration:
+`runtime.provider: qwen`, `runtime.product: qwen-code` и
+`runtime.version: 0.22.2`. Документированная fixture schema дополнительно
+содержит `configured_model.id`, равный `active_model.id`,
+`role_model_identity_lock`, `fresh_named_subagent`,
+`implementer_continuation`, `reviewer_policy` и `verification_command`.
+Неполная или недоверенная декларация возвращает
+`BLOCKED_CAPABILITY` до dispatch.
+
+Boolean capabilities `role_model_identity_lock`, `fresh_named_subagent` и
+`implementer_continuation` принимают только literal `true`; строка, число или
+другое truthy value является malformed capability. `verification_command`
+должна быть непустой строкой команды либо object ровно вида
+`{"argv": ["<non-empty argument>", "..."]}`. Boolean, пустая строка, пустой
+`argv`, нестроковый аргумент или дополнительные поля не являются executable
+verification command и дают `BLOCKED_CAPABILITY`.
+
+`reviewer_policy` валидна только при `fresh_named: true`, `fork: false`,
+`write: false` и read-only tool classes `read`/`verify`. Поэтому Reviewer
+всегда создаётся как fresh named subagent, является read-only Reviewer,
+не наследует context fork и не получает write-capable tools. Controller и все
+role-agents сохраняют одну
+проверенную configured model identity. Успешная fixture возвращает observed
+configuration и `usage: AVAILABLE|NOT_AVAILABLE`; отсутствие provider usage
+не заменяется оценкой токенов.
+
+До dispatch adapter также подтверждает executable verification command.
+
+Этот профиль использует `repair_policy: QWEN_CONVERGENT`. Qwen delivery
+поставляется нативным extension из корня repository: `qwen-extension.json`
+публикует тот же `finish-ticket` skill и `finish-ticket-controller` agent.
+Extension ссылается на этот единственный файл lifecycle, не дублирует его;
+короткий запуск — `/finish-ticket ticket <ID или путь>`. Codex adaptive profile
+и его numeric budget остаются без изменений.
+
+### Qwen convergent repair policy
+
+У Qwen нет числового лимита repair-раундов. Его заменяет append-only ledger с
+фиксированной схемой событий и непрерывным `sequence`:
+
+- `baseline` начинается с `sequence: 1` и содержит `fixed_point` и полный
+  список `open_findings`;
+- `local_attempt` содержит один открытый finding, воспроизводимый `RED`,
+  hypothesis и `GREEN`; он не меняет ticket status и не закрывает finding;
+- `repair_candidate` содержит `diff` с `scope_delta`, точные
+  `attempt_sequences` уже записанных local attempts, `normalized_root_cause`
+  и exact runtime/model/usage trace; `normalized_root_cause` должен точно
+  совпадать с нормализацией root cause всех referenced attempts, а `model.id`
+  каждого historical candidate — с configured identity текущего Qwen profile;
+- `review_verdict` ссылается на repair candidate, содержит fresh named
+  read-only Reviewer без fork/write, `SPEC`, `CODE_QUALITY`, regression/scope
+  flags и список closed finding fingerprints;
+- `terminal` содержит terminal `status` и непустой `reason`.
+
+Запись никогда не перезаписывает предыдущую. Допустимы только переходы
+`baseline|review_verdict(CONTINUE) -> local_attempt+ -> repair_candidate ->
+review_verdict`; non-`CONTINUE` verdict должен сразу завершаться `terminal`, а
+запись после terminal невалидна. Controller проверяет *всю* историю перед
+новым кандидатом: каждый прежний `CONTINUE` обязан иметь complete
+attempt/candidate/review evidence на любом outcome path, включая terminal.
+Каждый policy stop `BLOCKED` или `BLOCKED_FOR_DESIGN` после valid baseline
+append-only добавляет `terminal` с непустой reason, в том числе при неполном
+repair evidence.
+Closed findings должны быть уникальным
+подмножеством current open findings и findings referenced attempts; повторное
+или дополнительное закрытие без repair evidence не является progress.
+
+Fresh Reviewer возвращает `SPEC`, `CODE_QUALITY`, closed finding fingerprints,
+regression accepted criteria и unapproved scope expansion. Controller разрешает
+`CONTINUE` только при `SPEC: PASS`, `CODE_QUALITY: PASS`, отсутствии
+регрессии/неутверждённого scope и closure известного open finding. Сравнение
+root cause нормализует register, пробелы, `_` и `-`; это не даёт повторной
+причине пройти как новой из-за spelling. В этом случае Verifier по общему
+lifecycle запускается только после static PASS.
+
+Автоматический loop немедленно останавливается: `NEW_REQUIREMENT`,
+`DESIGN_GAP` и unapproved scope expansion дают `BLOCKED_FOR_DESIGN`;
+regression — `BLOCKED`; повтор пары finding type + normalized root cause без
+нового reproducible RED даёт `BLOCKED` с
+`REPEATED_ROOT_CAUSE_WITHOUT_NEW_RED`. Отсутствующий RED, fresh review или
+закрытый finding также не является progress и не разрешает continuation.
 
 ## Роли и полномочия
 
@@ -59,7 +188,7 @@
    запрещённые соседние подсистемы.
 8. Объявить targeted RED/GREEN loop, команды review/verification и stop gates.
 9. Зафиксировать budget: тип ticket, максимум и текущий счётчик role-agent
-   запусков, Sol, full suite и compaction; также правило эскалации модели.
+   запусков, frontier, full suite и compaction; также правило эскалации модели.
 10. При возобновлении сопоставить checkpoint с текущим partial diff и отметить
    устаревшее evidence.
 
@@ -78,8 +207,8 @@ escape-последовательностей.
 |---|---|
 | Ticket / spec | `<пути или идентификаторы>` |
 | Risk | `<сложность; факторы>` |
-| Routing | `<следующая роль; model/effort; причина>` |
-| Budget | `<class; role-agent N/M; Sol N/M; suite N/1; compaction N/M>` |
+| Routing | `<следующая роль; requested/selected tier; effort; причина>` |
+| Budget | `<class; role-agent N/M; frontier N/M; suite N/1; compaction N/M>` |
 | Stop gates / design gaps | `<условия; нет или список>` |
 | Next action | `<spawn, confirmation или BLOCKED_FOR_DESIGN>` |
 
@@ -112,35 +241,30 @@ ordinary ticket отчёт является объявленным планом:
 
 ## Выбор модели и effort
 
-Сначала проверить фактический allowlist текущего multi-agent инструмента.
-Названия Luna, Terra и Sol ниже означают доступные семейства соответствующего
-уровня; при отсутствии семейства выбрать ближайшую доступную модель и явно
-записать соответствие.
+Сначала проверить фактический verified inventory текущего multi-agent
+инструмента. Policy зависит только от capability tier, не от family name:
+Luna, Terra и Sol — лишь примеры значений текущего registry. Неизвестный или
+недоверенный inventory блокирует lifecycle, а не разрешает planned model ID.
 
-Если allowlist пока недоступен, всё равно выбрать planned capability tier из
-таблицы, например `Luna high`, и пометить только точный model ID как
-`UNRESOLVED_UNTIL_SPAWN`. Значение «определить позже» без tier и effort не
-заполняет `PREFLIGHT_REPORT`.
-
-| Работа | Модель | Effort |
+| Работа | Requested tier | Effort |
 |---|---|---:|
-| Механическая реализация 1–2 файлов | Luna | high |
-| Обычная реализация или Controller | Terra | medium |
-| Сложная или критичная реализация | Terra | high |
-| Обычный Reviewer | Terra | medium |
-| Критичный Reviewer | Terra | high |
-| Deterministic Verifier | Luna | medium |
-| Интерпретирующий Verifier | Terra | medium |
-| Design-adjudication или доказанный недостаток Terra | Sol | high |
+| Механическая реализация 1–2 файлов | efficient | high |
+| Обычная реализация или Controller | standard | medium |
+| Сложная или критичная реализация | standard | high |
+| Обычный Reviewer | standard | medium |
+| Критичный Reviewer | standard | high |
+| Deterministic Verifier | efficient | medium |
+| Интерпретирующий Verifier | standard | medium |
+| Design-adjudication или доказанный недостаток standard tier | frontier | high |
 
 Ticket критичен при сочетании минимум двух факторов: security/privacy;
 concurrency/cancellation; OS/native/UIA/COM/driver/installer; необратимый side
 effect; новый architecture seam/state owner; труднообратимое изменение данных
 или Git history.
 
-Sol `high` не является default для critical ticket. Перед его выбором Controller
-записывает конкретный недостаток Terra: неразрешённый finding, невозможность
-обосновать design или подтверждённый failure targeted loop. Больше одного Sol
+Frontier `high` не является default для critical ticket. Перед его выбором Controller
+записывает конкретный недостаток standard tier: неразрешённый finding, невозможность
+обосновать design или подтверждённый failure targeted loop. Больше одного frontier
 на ticket требует явного разрешения пользователя. `xhigh` разрешён только
 после измеримого недостатка `high`; `max` и `ultra` не входят в стандартный
 процесс.
@@ -150,17 +274,17 @@ Sol `high` не является default для critical ticket. Перед ег
 ```text
 Раунд: <номер>
 Роль: <роль>
-Budget: <role-agent N/M; Sol N/M; full suite N/1; compaction N/M>
+Budget: <role-agent N/M; frontier N/M; full suite N/1; compaction N/M>
 Сложность: <простая | обычная | сложная | критичная>
 Риск: <низкий | средний | высокий | критичный>
-Модель и effort: <точные значения из allowlist>
+Tier, model ID и effort: <значения из verified inventory>
 Причина: <почему это минимально достаточная конфигурация>
 Эскалация: <нет или предыдущая -> новая с причиной>
 ```
 
 ## Budget и context gate
 
-| Класс ticket | Role-agent запуска | Sol без нового разрешения | Full suite | Compaction |
+| Класс ticket | Role-agent запуска | Frontier без нового разрешения | Full suite | Compaction |
 |---|---:|---:|---:|---:|
 | Ordinary | 3 | 0 | 1 | 0 |
 | Critical | 4 | 1 | 1 | 1 |

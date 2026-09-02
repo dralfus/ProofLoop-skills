@@ -88,10 +88,37 @@ User-facing отчёт теперь оставляет только ticket/spec,
 stop gates/design gaps и next action. Детали сохраняются в packet/evidence и
 показываются только как один blocking detail при реальном stop gate.
 
+## Наблюдаемый failure mode 6: неподтверждённая переносимость Qwen runtime
+
+Codex adaptive profile нельзя переносить в Qwen Code по имени модели или
+неявным предположениям о subagent/tools. Без exact runtime version, одной
+configured identity, fresh independent Reviewer и executable verification
+workflow мог бы ошибочно выдать независимое evidence либо silently fallback к
+self-review.
+
+## Наблюдаемый failure mode 7: Qwen repair без доказуемой сходимости
+
+У Qwen одна настроенная модель может делать много локальных исправлений, но
+снятие числового cap без independent progress evidence превращает полезную
+continuation в self-review loop. Статус local attempt и closure finding нельзя
+смешивать: первый не меняет ticket, второй требует свежего Reviewer.
+
+Политика `QWEN_CONVERGENT` заменяет только numeric cap append-only ledger и
+остальными common lifecycle gates. Повтор type/root cause без нового
+reproducible RED, regression accepted criteria, `NEW_REQUIREMENT`, `DESIGN_GAP`
+или unapproved scope прекращают automatic continuation.
+
+Для устранения failure mode 6 Qwen delivery теперь проверяется отдельным
+native extension: он делает existing skill и named Controller discoverable, но
+ссылается на единый canonical lifecycle. Реальный pilot остаётся честно
+`NOT_RUN`, пока exact Qwen CLI/runtime не доступен.
+
 ## Текущая цель
 
-Проверить глобальный plugin и протокол версии `1.8` на следующем реальном
-ticket без копирования workflow-файлов в проект и измерить:
+Проверить глобальный plugin и протокол версии `1.11` на следующем реальном
+ticket без копирования workflow-файлов в проект. До первого spawn подтвердить
+runtime capability declaration и `BLOCKED_CAPABILITY` при её отсутствии, затем
+измерить:
 
 - число role-agent запусков;
 - число fix-раундов;
