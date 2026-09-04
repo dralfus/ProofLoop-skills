@@ -163,6 +163,12 @@ regression — `BLOCKED`; повтор пары finding type + normalized root c
 `BLOCKED_FOR_DESIGN` или `BLOCKED`. Role-agents не создают agents. В каждый
 момент работает не более одного writer.
 
+Внешний runner (другая модель, CLI или CI-агент) не является role-agent и не
+имеет acceptance authority. До подтверждённого enforcement он работает только
+в изолированной worktree без доступа к очереди UI/Sandbox и full suite. Его
+изменения и заявления проверяет Controller тем же путём, что и любые другие
+непроверенные входные данные.
+
 ## PREFLIGHT_REPORT
 
 До первого spawn Controller обязан:
@@ -191,10 +197,13 @@ regression — `BLOCKED`; повтор пары finding type + normalized root c
    запусков, frontier, full suite и compaction; также правило эскалации модели.
 10. При возобновлении сопоставить checkpoint с текущим partial diff и отметить
    устаревшее evidence.
+11. Создать acceptance ledger: для каждого критерия отметить `implementation`,
+    `independent_review`, `executable_evidence` и статус `open | ready |
+    verified | design_gap`. `ready` не является `verified`.
 
 ## User-facing PREFLIGHT_REPORT
 
-Controller сначала выполняет все десять preflight-проверок, но пользователю
+Controller сначала выполняет все одиннадцать preflight-проверок, но пользователю
 выводит только decision receipt. Детали baseline, acceptance mapping, scope,
 `SEAM_FEASIBILITY` и targeted commands сохраняются в рабочем preflight record,
 `IMPLEMENTATION_PACKET` и final evidence; не печатать их в обычном отчёте.
@@ -216,6 +225,10 @@ escape-последовательностей.
 таблицы вывести только одну строку `Blocking detail: <criterion/condition; что
 нужно для продолжения>`. Не выводить полную criterion table, если она не
 блокирует решение пользователя.
+
+Acceptance ledger остаётся в preflight record и final evidence; его показывают
+пользователю только как blocking detail, если незакрытый criterion запрещает
+следующее действие.
 
 Для `critical`, resumed/partial, design gap или `BASELINE_INCOMPLETE` Controller
 останавливается и запрашивает подтверждение до первого agent spawn. Для
@@ -298,19 +311,41 @@ Controller не резервирует одновременно отдельны
 повторного Verifier.
 
 Перед каждым spawn Controller показывает текущий счётчик. При достижении
-лимита он сохраняет checkpoint и возвращает `BUDGET_GATE`; новый spawn возможен
-только после отдельного разрешения пользователя с обновлённым budget. Fix rounds
-3–5 также требуют отдельного разрешения каждый; пять остаётся абсолютным
-terminal limit.
+лимита он сохраняет checkpoint и возвращает `BUDGET_GATE`. Запрос расширения
+содержит `NEXT_CLOSURE`: одну незакрытую пару «критерий -> red-capable loop»,
+требуемые роли и состояние всех остальных критериев ledger. Новый budget не
+сбрасывает counters ticket и не превращает `open` criterion в `ready`.
+Без `NEXT_CLOSURE` Controller возвращает `BLOCKED_FOR_DESIGN` или `BLOCKED`,
+а не создаёт role-agent. Fix rounds 3–5 также требуют отдельного разрешения
+каждый; пять остаётся абсолютным terminal limit.
 
 Controller ждёт role-agent event-driven и не опрашивает статус периодически.
 Допустим один follow-up для уточнения отчёта; затем используется verdict либо
 stop gate. Compaction перед дорогой ролью требует компактного checkpoint и
-свежего Controller, который заново сверяет baseline, diff и counters.
+свежего Controller, который заново сверяет baseline, diff и counters. Такой
+fresh Controller обязателен также при resume после checkpoint или изменении
+execution environment (Sandbox, worktree, test worker); он получает только
+resume packet: baseline, diff summary, ledger, counters, последнее red/green
+evidence и один следующий loop.
 
 Full suite сохраняется отдельной evidence-записью: command, started/finished,
 exit code, pass/fail/skipped counts и commit/diff. Если после успешного suite
 production diff не менялся, повтор перед commit не выполняется.
+
+## Execution permit
+
+Controller — единственный submitter UI/Sandbox jobs. Для каждого job он
+создаёт `TEST_PERMIT` с ID, snapshot/commit, одной командой или filter,
+ожидаемым evidence и признаком `targeted | full_suite`. До передачи job
+проверить его against фактической schema worker; одновременно разрешён один
+pending job, а `full_suite` — только один на ticket.
+
+Если worker отклонил job до запуска целевой команды, вернуть `JOB_REJECTED`:
+это не result ticket и не расходует новый role-agent slot. Тот же Verifier
+исправляет permit/job одним follow-up; новый Verifier допустим только после
+исполняемого результата предыдущего job. Если submitter enforcement технически
+не существует, внешний runner не получает доступ к queue, а Controller сам
+создаёт и читает job.
 
 ## Основной цикл
 
@@ -333,8 +368,14 @@ production diff не менялся, повтор перед commit не вып�
    через fake/injected seam без такого consumer даёт `REGRESSION` и `FAIL`.
    Reviewer не изменяет файлы, не создаёт agents и не запускает full suite.
 4. При любом `FAIL` не запускать Verifier. Классифицировать findings и провести
-   adjudication.
-5. Только после `SPEC: PASS` и `CODE_QUALITY: PASS` создать Verifier.
+   adjudication. Reviewer возвращает `SCOPED_PASS`, если его scoped repair
+   корректен, но ledger содержит хотя бы один `open` criterion; это не
+   `SPEC: PASS` ticket.
+5. До Verifier Controller сверяет ledger. Если любой criterion не имеет
+   `implementation + independent_review` со статусом `ready`, вернуть
+   `ACCEPTANCE_INCOMPLETE`; Verifier и full suite не запускаются. Только после
+   полного `SPEC: PASS`, `CODE_QUALITY: PASS` и ledger без `open/design_gap`
+   создать Verifier.
 6. Verifier выполняет targeted acceptance, один обычный full suite при
    необходимости и обязательные live-проверки. Отсутствующую проверку отмечает
    `NOT_RUN` с причиной.
@@ -399,10 +440,11 @@ RED/GREEN evidence: <команда, exit code, результат>
 Reviewer:
 
 ```text
-SPEC: PASS | FAIL
+SPEC: PASS | SCOPED_PASS | FAIL
 CODE_QUALITY: PASS | FAIL
 Fixed point и diff: <значения>
 Acceptance: <критерий -> evidence>
+Acceptance ledger: <критерий -> status; незакрытые criteria обязательны>
 Findings: <тип, severity, корневая причина, файл/область, требуемый результат>
 Design gaps/new requirements: <список>
 Непроверенные риски: <список>
@@ -466,8 +508,9 @@ Coverage: <COMPLETE|PARTIAL|NOT_AVAILABLE>
 Controller сохраняет project/ticket ID, baseline и итоговый diff, acceptance
 evidence, команды и exit codes, тесты Implementer, модели/effort, findings и
 adjudication, число fix-раундов, сработавшие stop gates, live/NOT_RUN проверки,
-budget counters, compaction/checkpoint и итоговый статус.
-К каждой закрытой или отклонённой попытке также сохраняется `TOKEN_USAGE`.
+budget counters, compaction/checkpoint, `TEST_PERMIT`/`JOB_REJECTED`, состояние
+acceptance ledger и итоговый статус. К каждой закрытой или отклонённой попытке
+также сохраняется `TOKEN_USAGE`.
 
 `DONE` разрешён только при независимых `SPEC: PASS`, `CODE_QUALITY: PASS` и
 достаточном `ACCEPTED` evidence по каждому acceptance criterion.

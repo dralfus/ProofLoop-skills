@@ -56,6 +56,10 @@ description: Использовать для реализации или воз�
 - Один writer работает одновременно.
 - Reviewer предшествует Verifier.
 - `DONE` требует независимого исполняемого evidence.
+- `SCOPED_PASS` не открывает Verifier: до него Controller сверяет полный
+  acceptance ledger.
+- UI/Sandbox job создаёт только Controller после schema-valid `TEST_PERMIT`;
+  внешний runner не получает этот канал без технического enforcement.
 - Повтор корневой причины, design gap, превышение scope, бюджета или контекста
   включает stop gate.
 - После closure Controller публикует observed `TOKEN_USAGE`: отдельно

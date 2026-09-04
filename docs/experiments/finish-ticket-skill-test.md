@@ -128,3 +128,45 @@ GREEN: каталог, frontmatter, prompts, инструкции и GitHub Acti
 на `finish-ticket`; поиск прежнего имени не вернул результатов. Свежий агент
 по запросу `$finish-ticket` прочитал `references/task-lifecycle.md` и выдал
 полный `PREFLIGHT_REPORT` до role-agent spawn.
+
+## RED версии 1.4: частичный PASS открыл verification
+
+Наблюдаемый pressure scenario показал:
+
+- критичный ticket был resumed после checkpoint;
+- release matrix не содержала обязательный negative-control, то есть один
+  criterion оставался `open`;
+- Reviewer подтвердил только узкий repair, а Controller назвал это PASS и
+  запустил Verifier;
+- первый Sandbox job был отклонён worker-ом из-за лишнего свойства до запуска
+  `dotnet`, после чего был запрошен новый Verifier slot;
+- внешний runner до Controller создал множество test jobs, включая full suite.
+
+Это подтверждает два form failure: частичный review не был структурно отделён
+от полного PASS ticket, а текстовая инструкция не ограничивает side effects
+runner без технической границы.
+
+## GREEN-критерии версии 1.4
+
+В pressure scenario Controller обязан:
+
+1. показать acceptance ledger всех criteria;
+2. вернуть `ACCEPTANCE_INCOMPLETE`, не создавая Verifier или full suite, пока
+   negative-control имеет статус `open`;
+3. при расширении budget показать `NEXT_CLOSURE` с одним criterion и его
+   red-capable loop, не сбрасывая counters;
+4. предоставить внешнему runner только изолированную worktree без UI/Sandbox
+   queue; без enforcement его job не является evidence;
+5. при `JOB_REJECTED` до целевой команды использовать follow-up того же
+   Verifier, а не новый role-agent slot.
+
+## GREEN версии 1.4
+
+Свежий независимый Luna `medium` получил только runtime-протокол и тот же
+pressure scenario. Он вернул `ACCEPTANCE_INCOMPLETE`, не допустил Verifier или
+full suite, потребовал `NEXT_CLOSURE` без сброса counters, изолировал Qwen от
+queue и назначил `JOB_REJECTED` follow-up того же Verifier. Все пять критериев
+формы выполнены.
+
+Это проверяет решения Controller; техническое enforcement Sandbox queue
+отдельно подтверждается на следующем реальном ticket.

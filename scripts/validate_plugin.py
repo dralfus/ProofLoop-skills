@@ -68,6 +68,12 @@ REQUIRED_CONTRACT_TERMS = (
     "role-agent 3/4",
     "full suite 1",
     "compaction 0/1",
+    "acceptance ledger",
+    "SCOPED_PASS",
+    "ACCEPTANCE_INCOMPLETE",
+    "TEST_PERMIT",
+    "JOB_REJECTED",
+    "NEXT_CLOSURE",
 )
 
 QWEN_EXTENSION_MANIFEST = "qwen-extension.json"

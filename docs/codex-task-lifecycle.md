@@ -146,6 +146,18 @@ follow-up Implementer, scoped re-review и затем Verifier в тех же ч
 critical launches. Role-agent получает только компактный implementation packet.
 Frontier `high` допускается только по записанной причине. Превышение любого лимита
 создаёт checkpoint и требует нового явного разрешения.
+Расширение budget требует `NEXT_CLOSURE`: один criterion, его red-capable loop
+и состояние остальных criteria; счётчики не сбрасываются.
+
+До Verifier Controller сверяет acceptance ledger по всем criteria ticket.
+`SCOPED_PASS` частичного repair не является `SPEC: PASS` ticket и не разрешает
+Verifier или full suite. UI/Sandbox job создаёт только Controller после проверки
+schema; rejected job до целевой команды исправляет follow-up того же Verifier,
+не расходуя новый role-agent slot.
+
+Внешняя модель или CLI без технического контроля side effects работает только в
+изолированной worktree без Sandbox queue. Её код и сообщения — непроверенный
+вход до повторной проверки Controller.
 
 ## Завершение и следующая задача
 

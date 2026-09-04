@@ -5,7 +5,7 @@ SPECIFICATION
     ↓
 ACCEPTANCE CONTRACT
     ↓
-PREFLIGHT: RISK + SCOPE + STOP CONDITIONS
+PREFLIGHT: RISK + SCOPE + ACCEPTANCE LEDGER + STOP CONDITIONS
     ↓
 SEAM FEASIBILITY: ENTRY POINT + TEST SEAM + RED COMMAND + OWNER
     ↓
@@ -18,9 +18,9 @@ IMPLEMENTER + TARGETED RED/GREEN
 IMPLEMENTED
     ↓
 INDEPENDENT STATIC REVIEW
-    ├─ FAIL/NEW REQUIREMENT/DESIGN GAP
+    ├─ FAIL/SCOPED_PASS/NEW REQUIREMENT/DESIGN GAP
     │       ↓
-    │   ADJUDICATION
+    │   ACCEPTANCE_INCOMPLETE / ADJUDICATION
     │       ├─ SCOPED FIX
     │       └─ BLOCKED_FOR_DESIGN
     ↓ PASS
@@ -55,6 +55,9 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
 - Только Controller создаёт subagents.
 - Role-agents не создают дочерних agents.
 - Reviewer выполняется до Verifier.
+- `SCOPED_PASS` подтверждает только scoped repair и не открывает Verifier.
+- Verifier и full suite запускаются лишь когда каждый criterion acceptance
+  ledger имеет implementation и independent review.
 - Full suite запускается после статического PASS, а не после каждого fix.
 - Новое требование проходит adjudication и не становится автоматическим fix.
 - Повтор одной корневой причины во втором раунде останавливает implementation-
@@ -74,6 +77,10 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
   Продолжение сверх него — новое явное решение пользователя и checkpoint.
 - Frontier `high` не является default для критичного ticket: его используют
   после измеримого недостатка standard tier либо для design-adjudication.
+- Только Controller создаёт schema-valid `TEST_PERMIT` для UI/Sandbox. Внешний
+  runner без технического enforcement работает без доступа к этому каналу.
+- `JOB_REJECTED` до запуска теста исправляется follow-up того же Verifier и не
+  расходует новый role-agent slot.
 - `DONE` требует независимого evidence по каждому acceptance criterion.
 - После terminal status или `REJECTED` Controller показывает observed tokens
   Implementer и total ticket; неизвестные provider counters не оцениваются.
@@ -102,4 +109,4 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
 зафиксировать runtime capability declaration, risk, ожидаемый file scope и
 stop conditions; при отсутствующей capability подтвердить
 `BLOCKED_CAPABILITY`. После завершения сравнить число запусков, тестов,
-исправлений и расхода контекста с ticket 353.
+исправлений и расхода контекста в раннем критичном pilot.

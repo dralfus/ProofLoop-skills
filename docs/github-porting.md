@@ -4,7 +4,7 @@
 
 - plugin находится в `plugins/agentic-development-workflow/`;
 - marketplace описан в `.agents/plugins/marketplace.json`;
-- plugin `agentic-development-workflow` имеет версию `1.11.0`;
+- plugin `agentic-development-workflow` имеет версию `1.11.1`;
 - локальное состояние, временные файлы и старые ZIP исключены из Git;
 - GitHub Actions валидирует manifest и обязательные файлы plugin.
 

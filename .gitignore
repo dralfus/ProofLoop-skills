@@ -3,6 +3,11 @@
 .codex/
 dist/
 
+# Локальные, не обезличенные evidence конкретных проектов
+docs/experiments/ticket-353-checkpoint-2026-08-28.md
+docs/experiments/ticket-353-cost-baseline-2026-08-29.md
+docs/experiments/ticket-363-execution-evidence-gap-2026-08-31.md
+
 # Среды и кэши
 .venv/
 __pycache__/

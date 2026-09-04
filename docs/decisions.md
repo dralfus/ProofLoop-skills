@@ -32,7 +32,7 @@ Superpowers используется для целевого TDD, диагнос
 
 Статус: принято 2026-08-28.
 
-Основание: ticket 353 сохранил безопасность благодаря независимой проверке, но
+Основание: ранний критичный pilot сохранил безопасность благодаря независимой проверке, но
 потребовал нескольких повторных реализаций, вложенных reviewers, повторных
 full-suite запусков и архитектурных решений внутри fix-loop.
 
@@ -84,7 +84,7 @@ workflow-файлов, а старт ticket — одной короткой ко
 
 Статус: принято 2026-08-30.
 
-Наблюдаемый failure: ticket 353 завершился локально, но потребовал 7 запусков
+Наблюдаемый failure: ранний критичный pilot завершился локально, но потребовал нескольких запусков
 role-agent, 2 context compaction и значительного повторного чтения контекста.
 Существующие health gates защищали корректность, но не делали расход до первого
 дорогого запуска наблюдаемым и ограниченным.
@@ -116,9 +116,9 @@ verification, но не превышает preflight-бюджет без явн�
 
 Статус: принято 2026-08-31.
 
-Наблюдаемый failure: ticket 363 требует полного clipboard snapshot/restore и
-детерминированной injected STA/clipboard matrix. Доступный production code
-сохраняет snapshot только для text/UnicodeText и очищает non-text clipboard;
+Наблюдаемый failure: критичный ticket требовал полного snapshot/restore
+external state и детерминированной injected matrix. Доступный production code
+сохранял состояние только частично и очищал неподдерживаемые форматы;
 при этом исходный preflight не требовал показать owner и test seam для каждого
 acceptance criterion. Агент мог потратить implementation-раунд на выяснение
 архитектуры вместо ранней остановки.
@@ -180,9 +180,9 @@ baseline 353 или заметить, где расходуются tokens.
 
 Статус: принято 2026-08-31.
 
-Наблюдаемый failure: в ticket 363 deterministic clipboard matrix прошла через
-fake boundary, но reference-composer с production clipboard boundary завершался
-`capture_failed`. Full suite показал 12 failures, которые являлись каскадом
+Наблюдаемый failure: deterministic matrix прошла через fake boundary, но
+production-shaped consumer с реальной boundary завершался ошибкой. Full suite
+показал каскад failures, которые являлись следствием
 одной primary причины; scoped evidence и Reviewer PASS не доказали consumer
 compatibility.
 
@@ -369,3 +369,29 @@ artifact содержит `QWEN_CLI=ABSENT` и `NOT_RUN`, а документа�
 Критерий успеха: `python scripts/validate_plugin.py --qwen-extension-root .`
 и bundled tests проходят; installed extension показывает `finish-ticket` и
 `finish-ticket-controller`, а canonical lifecycle существует в одном месте.
+## D018 — Закрывать acceptance ledger до verification и изолировать внешние runners
+
+Статус: принято 2026-09-04.
+
+Основание: реальный pilot показал, что `SCOPED_PASS` частичного repair позволил
+запустить Verifier при заранее известном незакрытом criterion. Отдельно
+неуправляемый внешний runner создал десятки Sandbox jobs и повторные full suite;
+текстовые инструкции не являются техническим ограничением side effects.
+
+Решение:
+
+1. Controller ведёт acceptance ledger для каждого criterion: implementation,
+   independent review, executable evidence и статус.
+2. `SCOPED_PASS` не равен `SPEC: PASS` ticket; при незакрытом ledger Controller
+   возвращает `ACCEPTANCE_INCOMPLETE` и не запускает Verifier/full suite.
+3. UI/Sandbox job создаёт только Controller через schema-valid `TEST_PERMIT`.
+   Отклонение job до целевой команды даёт `JOB_REJECTED` и исправляется одним
+   follow-up того же Verifier.
+4. Внешний runner без enforcement работает в изолированной worktree без queue
+   и full-suite capability; его результат повторно исполняет Controller.
+5. Расширение budget требует `NEXT_CLOSURE`; resume после checkpoint или смены
+   execution environment создаёт fresh Controller с компактным handoff.
+
+Критерий успеха: на следующем похожем ticket ноль Verifier/full-suite запусков
+при незакрытом criterion, ноль новых role-agent после rejected job и ноль
+неразрешённых Sandbox jobs от внешнего runner.
