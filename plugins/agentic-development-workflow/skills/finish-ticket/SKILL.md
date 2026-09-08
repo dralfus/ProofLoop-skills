@@ -67,6 +67,11 @@ description: Использовать для реализации или воз�
   `NOT_AVAILABLE`.
 - После `REJECTED` Controller публикует `FAILURE_SUMMARY`: primary cause,
   известное число cascade failures, in-scope verdict и следующий bounded loop.
+- Непрозрачный aggregate reject сначала получает один test-only diagnostic loop
+  с raw-free `FAILURE_PROJECTION`; он не открывает repair, Verifier или full suite.
+- `QWEN_ASSIST` — только внешний bounded worker: до каждого запуска Controller
+  читает `references/qwen-assist.md`, делает capability probe и сам проверяет
+  его schema-valid результат; Qwen не получает acceptance authority.
 - Один процессный skill на роль: Implementer использует TDD либо диагностику;
   Reviewer не оркестрирует; Verifier подтверждает evidence.
 

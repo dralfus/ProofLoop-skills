@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 
-REQUIRED_PROTOCOL_VERSION = "1.11"
+REQUIRED_PROTOCOL_VERSION = "1.12"
 REQUIRED_CAPABILITIES = (
     "model_identity",
     "role_dispatch_and_continuation",
@@ -74,6 +74,13 @@ REQUIRED_CONTRACT_TERMS = (
     "TEST_PERMIT",
     "JOB_REJECTED",
     "NEXT_CLOSURE",
+    "FAILURE_PROJECTION",
+    "FAILURE_EVIDENCE: INCOMPLETE",
+    "DIAGNOSTIC_EVIDENCE_INCOMPLETE",
+    "ровно один test-only diagnostic loop",
+    "QWEN_ASSIST bridge",
+    "references/qwen-assist.md",
+    "семь вызовов на ticket",
 )
 
 QWEN_EXTENSION_MANIFEST = "qwen-extension.json"

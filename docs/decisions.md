@@ -395,3 +395,60 @@ artifact содержит `QWEN_CLI=ABSENT` и `NOT_RUN`, а документа�
 Критерий успеха: на следующем похожем ticket ноль Verifier/full-suite запусков
 при незакрытом criterion, ноль новых role-agent после rejected job и ноль
 неразрешённых Sandbox jobs от внешнего runner.
+
+## D019 — Диагностировать непрозрачный aggregate reject до repair
+
+Статус: принято 2026-09-08.
+
+Наблюдаемый failure: independent Reviewer мог подтвердить статический diff, а
+targeted executable acceptance вернуть только aggregate boolean `false`.
+`FAILURE_SUMMARY` тогда честно содержит `UNKNOWN`, но следующий implementation
+round не имеет установленной primary cause и превращается в дорогую догадку.
+
+Решение:
+
+1. Aggregate acceptance-test при failure обязан отдавать raw-free
+   `FAILURE_PROJECTION`: стабильные scenario/criterion ID, status, terminal
+   status, raw-free flag, cleanup, evidence level, build ID и другие уже
+   разрешённые поля.
+2. Если failure summary остаётся unknown только из-за отсутствующей projection,
+   Controller фиксирует `FAILURE_EVIDENCE: INCOMPLETE`.
+3. Разрешён один test-only diagnostic loop: follow-up существующего Implementer
+   меняет только diagnostic test, а Controller создаёт один schema-valid
+   targeted `TEST_PERMIT`. Это не новый role-agent launch и не repair round.
+4. До projection не запускаются repair, Verifier, full suite или live evidence.
+   Повторная непрозрачность завершается `BLOCKED` с причиной
+   `DIAGNOSTIC_EVIDENCE_INCOMPLETE`.
+
+Критерий успеха: на следующем aggregate reject в evidence есть raw-free first
+failure projection; до неё не появляется новый role-agent или full-suite job.
+Если one diagnostic loop не даёт usable projection, ticket завершён `BLOCKED`,
+а не продолжается новой догадкой.
+
+## D020 — Использовать Qwen только как ограниченный внешний assist worker
+
+Статус: принято 2026-09-08.
+
+Наблюдаемый failure: Qwen дешевле Codex, но на реальных задачах нарушала
+протокол, запускала лишние jobs и продолжала бесплодные циклы. Полный Qwen
+lifecycle с `QWEN_CONVERGENT` не является достаточным основанием передавать
+ей роль Implementer или acceptance authority.
+
+Решение: ввести отдельный `QWEN_ASSIST`, запускаемый Controller Codex как
+синхронный внешний worker. Каждый вызов проходит capability probe фактического
+CLI без version pin; отсутствие non-interactive JSON/schema, worktree,
+read-only mode или limits даёт `BLOCKED_CAPABILITY`. Первая операция —
+read-only `QWEN_RECON_REPORT` с тремя locatable facts, state owner, callback
+boundary и acceptance risk. Patch candidate допустим только после проверки
+Codex, в отдельной worktree, максимум два файла/200 строк/один targeted test.
+Qwen не выполняет Git-интеграцию, full suite или acceptance.
+
+На ticket действует общий cap семь вызовов. Новый retry обязан менять packet и
+добавлять evidence; повтор root cause или две непрогрессивные попытки дают
+`QWEN_UNUSABLE`. Полные отчёты остаются локальными вне Git; global JSONL
+содержит только обезличенные агрегаты.
+
+Критерий успеха: live read-only pilot возвращает schema-valid report без diff,
+shell/test side effects и без загрязнения worktree другого ticket; метрика не
+содержит код, пути или raw findings. Только после этого измеряется полезность
+малых patch candidates, а не их acceptance.

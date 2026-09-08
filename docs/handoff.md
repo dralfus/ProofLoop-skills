@@ -6,7 +6,7 @@
 
 Исполняемый protocol находится в
 `plugins/agentic-development-workflow/skills/finish-ticket/references/task-lifecycle.md`.
-Текущая версия protocol — `1.11`; plugin выпущен как `1.11.1`.
+Текущая версия protocol — `1.12`; plugin выпущен как `1.12.0`.
 
 Только Controller присваивает `DONE` после независимых `SPEC: PASS`,
 `CODE_QUALITY: PASS` и `ACCEPTED` evidence. Role-agents не создают других
@@ -19,6 +19,8 @@ agents и не обладают acceptance authority.
 - `SCOPED_PASS` не разрешает Verifier: acceptance ledger должен быть закрыт.
 - `TEST_PERMIT` ограничивает submission проверок; `JOB_REJECTED` до запуска
   целевой команды не расходует новый role-agent slot.
+- Непрозрачный aggregate reject получает один test-only diagnostic loop с
+  raw-free `FAILURE_PROJECTION`; повторная непрозрачность даёт `BLOCKED`.
 - Внешний runner работает только в изолированной worktree и не получает доступ
   к контролируемой очереди.
 - Numeric profile Codex ограничивает repair-loop; Qwen profile использует

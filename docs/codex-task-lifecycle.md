@@ -1,6 +1,6 @@
 # Жизненный цикл задач Codex
 
-Версия workflow: `1.11`
+Версия workflow: `1.12`
 
 ## Источник истины
 
@@ -124,6 +124,34 @@ Boolean capability в Qwen declaration должна быть literal `true`; с�
 непустая строка либо object `{"argv": ["<non-empty argument>", "..."]}`;
 пустой/неструктурный command также блокируется.
 
+## QWEN_ASSIST из Codex Desktop
+
+Это не запуск `finish-ticket` в Qwen и не дополнительный Implementer.
+Controller Codex может вызвать Qwen CLI как внешний синхронный worker только
+для bounded recon, а после успешной проверки — для малого patch candidate.
+До каждого вызова он выполняет capability probe по `qwen --help`; номер версии
+не используется как allow-list. Нужны `plan` mode, JSON output/schema,
+worktree, limits turns/wall-time/tool-calls и исключение subagents. Если хотя
+бы одной возможности нет, запуск завершается `BLOCKED_CAPABILITY` без fallback.
+
+Первый Qwen-вызов читает код из clean fixed-point worktree и возвращает только
+`QWEN_RECON_REPORT`: минимум три факта `file:line -> fact`, state owner,
+callback boundary и acceptance risk. Он не пишет файлы и не запускает shell,
+тесты, сеть/MCP или subagents. Controller самостоятельно проверяет report и
+отсутствие diff; результат не является acceptance evidence ticket.
+
+Суммарный budget — семь Qwen-вызовов на ticket. Повтор требует нового evidence
+и изменённого scope, criterion, RED-command либо hypothesis. Повтор root cause
+или две непрогрессивные попытки подряд дают `QWEN_UNUSABLE`. Patch candidate
+разрешён только после подтверждённого recon и ограничен двумя файлами, 200
+строками и одним targeted test. Qwen не делает Git-интеграцию, full suite или
+acceptance; Codex independently проверяет candidate и сам переносит diff.
+
+Исполняемые ограничения находятся в `scripts/qwen_assist.py` и
+`scripts/invoke_qwen_assist.ps1`; полный report хранится локально вне Git,
+а центральная JSONL-метрика — в `%LOCALAPPDATA%\ProofLoop Skills` без кода,
+путей и raw findings.
+
 ## Контроль перед расходом лимита
 
 До первого role-agent Controller обязан показать `PREFLIGHT_REPORT`: baseline,
@@ -172,6 +200,12 @@ Controller/Reviewer/Verifier и total ticket. Используются толь�
 usage/trace counters; недоступные значения отмечаются `NOT_AVAILABLE`.
 После `REJECTED` он также показывает `FAILURE_SUMMARY`: primary failure,
 подтверждённые cascade failures, in-scope verdict и следующий focused loop.
+Если aggregate acceptance-test вернул только общий boolean, Controller сначала
+запрашивает один test-only diagnostic loop с raw-free `FAILURE_PROJECTION`.
+Этот loop использует targeted `TEST_PERMIT`, follow-up исходного Implementer и
+не открывает repair, Verifier или full suite. Второе отсутствие usable
+projection завершает ticket как `BLOCKED` с
+`DIAGNOSTIC_EVIDENCE_INCOMPLETE`.
 
 ## Ручной аудит test suite
 

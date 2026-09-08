@@ -97,9 +97,29 @@ verification workflow возвращает `BLOCKED_CAPABILITY` до перво�
 fresh review. Повтор root cause, regression, `NEW_REQUIREMENT`, `DESIGN_GAP`
 или неутверждённое расширение scope останавливают automatic continuation.
 
+## Наблюдаемый failure mode 9: непрозрачный aggregate reject
+
+Aggregate acceptance может честно вернуть `REJECTED`, но один assertion вида
+`report.Passed == false` не позволяет установить primary failure, cascade или
+in-scope verdict. Новый repair в этой точке стал бы догадкой и мог бы запустить
+дорогой цикл без feedback signal.
+
+Версия `1.12` требует raw-free `FAILURE_PROJECTION` и разрешает ровно один
+test-only diagnostic loop без нового role-agent launch. Если projection не
+получена повторно, ticket блокируется как `DIAGNOSTIC_EVIDENCE_INCOMPLETE`.
+
+## Наблюдаемый failure mode 10: дешёвый worker повторяет невалидную работу
+
+Qwen полезна как дополнительный compute, но не доказала соблюдение role
+protocol: она может расширять scope, запускать лишние jobs и повторять попытки
+без новой диагностической информации. Поэтому `QWEN_ASSIST` не получает роль
+или acceptance authority. Она ограничена schema-first read-only recon в чистой
+worktree, затем малым candidate по отдельному решению Controller; health gate
+останавливает повтор root cause, две непрогрессивные попытки или седьмой вызов.
+
 ## Текущая цель
 
-Проверить глобальный plugin и протокол версии `1.11` на следующем реальном
+Проверить глобальный plugin и протокол версии `1.12` на следующем реальном
 ticket без копирования workflow-файлов в проект. До первого spawn подтвердить
 runtime capability declaration и `BLOCKED_CAPABILITY` при её отсутствии, затем
 измерить:
@@ -113,6 +133,7 @@ runtime capability declaration и `BLOCKED_CAPABILITY` при её отсутс�
 - модель/effort каждого запуска, compaction и повторное использование
   контекста;
 - итоговый статус и качество evidence.
+- долю reject с установленной primary failure и число diagnostic permits.
 
 Дополнительно проверить, что `SCOPED_PASS` не создаёт Verifier, rejected job
 не создаёт новую роль, а внешний runner не может поставить непредусмотренный

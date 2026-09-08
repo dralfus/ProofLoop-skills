@@ -30,6 +30,8 @@ TARGETED ACCEPTANCE + ONE FULL SUITE + LIVE EVIDENCE
     ↓
 ACCEPTED / REJECTED
     ↓
+OPAQUE REJECT → ONE TEST-ONLY DIAGNOSTIC → PRIMARY FAILURE / BLOCKED
+    ↓
 TOKEN USAGE REPORT
     ↓
 DONE / SCOPED FIX / BLOCKED
@@ -86,6 +88,9 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
   Implementer и total ticket; неизвестные provider counters не оцениваются.
 - После `REJECTED` Controller отделяет `PRIMARY_FAILURE` от подтверждённых
   `CASCADE_FAILURES` и назначает один focused next loop либо design stop.
+- Aggregate reject без raw-free `FAILURE_PROJECTION` разрешает только один
+  test-only diagnostic loop через targeted `TEST_PERMIT`; до projection нет
+  repair, Verifier или full suite.
 - Qwen Code v0.22.2 допускается только после exact capability preflight:
   одна configured identity, fresh named roles, continuation Implementer,
   read-only Reviewer без fork/write и executable verification. `QWEN_CONVERGENT`
@@ -101,11 +106,16 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
   `NEW_REQUIREMENT`, `DESIGN_GAP` или scope expansion останавливают loop.
   Qwen delivery extension публикует тот же canonical skill/lifecycle и named
   Controller agent; Codex numeric policy не меняется.
+- `QWEN_ASSIST` — отдельный schema-first внешний worker под управлением Codex
+  Controller: capability probe без version pin перед каждым вызовом, чистая
+  worktree, максимум семь вызовов и без acceptance authority. Сначала разрешён
+  только read-only recon; малый patch candidate допустим после independently
+  подтверждённого отчёта.
 
 ## Следующий эксперимент
 
 Установить plugin `agentic-development-workflow` и применить workflow версии
-`1.11` к одному реальному ticket без workflow-файлов в проекте. До реализации
+`1.12` к одному реальному ticket без workflow-файлов в проекте. До реализации
 зафиксировать runtime capability declaration, risk, ожидаемый file scope и
 stop conditions; при отсутствующей capability подтвердить
 `BLOCKED_CAPABILITY`. После завершения сравнить число запусков, тестов,

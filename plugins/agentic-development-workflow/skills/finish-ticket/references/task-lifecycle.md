@@ -1,6 +1,6 @@
 # Протокол выполнения одного ticket
 
-Версия workflow: `1.11`
+Версия workflow: `1.12`
 
 Это единственный обязательный runtime-протокол skill `finish-ticket`.
 Копии этого файла в проекте не требуются.
@@ -100,6 +100,17 @@ configuration и `usage: AVAILABLE|NOT_AVAILABLE`; отсутствие provider
 Extension ссылается на этот единственный файл lifecycle, не дублирует его;
 короткий запуск — `/finish-ticket ticket <ID или путь>`. Codex adaptive profile
 и его numeric budget остаются без изменений.
+
+### QWEN_ASSIST bridge
+
+`QWEN_ASSIST` — отдельный внешний worker, который Controller Codex может
+запустить для bounded read-only recon и затем малого patch candidate. Он не
+является Qwen role-agent profile, не получает acceptance authority и не
+заменяет `QWEN_CONVERGENT`. Точная процедура, JSON schema и health gate
+находятся в `references/qwen-assist.md`; Controller читает их перед вызовом.
+Допуск основан на capability probe каждого фактического CLI, а не на version
+pin. Общий cap — семь вызовов на ticket; повтор root cause либо две попытки
+без progress завершают worker как `QWEN_UNUSABLE`.
 
 ### Qwen convergent repair policy
 
@@ -380,8 +391,10 @@ pending job, а `full_suite` — только один на ticket.
    необходимости и обязательные live-проверки. Отсутствующую проверку отмечает
    `NOT_RUN` с причиной.
 7. При `ACCEPTED` Controller сохраняет evidence и присваивает `DONE`.
-8. При `REJECTED` Controller публикует `FAILURE_SUMMARY`; разрешён только
-   scoped fix подтверждённого требования.
+8. При `REJECTED` Controller публикует `FAILURE_SUMMARY`. Scoped fix допустим
+   только для подтверждённой primary failure. Если aggregate acceptance-test
+   вернул только общий boolean без raw-free failure projection, сначала
+   применить диагностический путь ниже.
 
 ## Findings и repair-loop
 
@@ -475,8 +488,35 @@ NEXT_LOOP: <bounded repair с focused command | BLOCKED_FOR_DESIGN | user decisi
 
 `CASCADE_FAILURES` не является числом всех failed tests: в него входят только
 падения, для которых Verifier установил одну primary cause. При `UNKNOWN`
-Controller не придумывает grouping и не расходует новый implementation budget
-до создания red-capable focused loop.
+Controller не придумывает grouping и не расходует новый implementation budget.
+
+### Непрозрачный aggregate reject
+
+Aggregate acceptance-test обязан при failure выводить raw-free
+`FAILURE_PROJECTION`, а не только boolean. Projection содержит в стабильном
+порядке минимум: criterion или scenario ID, status, terminal status, raw-free
+flag, cleanup, evidence level, build ID и другие уже разрешённые безопасные
+поля. Не выводить prompt, exception text, paths, secret или customer data.
+
+Если `PRIMARY_FAILURE`, `CASCADE_FAILURES` либо `IN_SCOPE` остаются `UNKNOWN`
+именно из-за отсутствия projection, Controller фиксирует
+`FAILURE_EVIDENCE: INCOMPLETE`. Разрешён ровно один test-only diagnostic loop:
+
+1. Передать исходному Implementer одним follow-up только diagnostic test patch;
+   production-файлы, ticket status и acceptance ledger не изменяются.
+2. Создать один обычный schema-valid targeted `TEST_PERMIT`; не добавлять в
+   worker неизвестные поля или новый kind. В Controller record отметить
+   `purpose: diagnostic`.
+3. Запустить test один раз и сохранить `FAILURE_PROJECTION` как evidence.
+   Diagnostic loop не расходует новый role-agent launch или fix round.
+4. До projection не запускать Verifier, full suite, live evidence или repair.
+5. Если projection снова отсутствует, raw-free не доказан либо не позволяет
+   установить primary failure, вернуть `BLOCKED` с причиной
+   `DIAGNOSTIC_EVIDENCE_INCOMPLETE`; второй diagnostic loop запрещён.
+
+После полной projection Controller классифицирует первый failure и только затем
+предлагает scoped repair, environment block или design gate. `REJECTED` не
+становится `DONE` и не снимается самим diagnostic loop.
 
 ## Token usage report
 
@@ -509,8 +549,8 @@ Controller сохраняет project/ticket ID, baseline и итоговый di
 evidence, команды и exit codes, тесты Implementer, модели/effort, findings и
 adjudication, число fix-раундов, сработавшие stop gates, live/NOT_RUN проверки,
 budget counters, compaction/checkpoint, `TEST_PERMIT`/`JOB_REJECTED`, состояние
-acceptance ledger и итоговый статус. К каждой закрытой или отклонённой попытке
-также сохраняется `TOKEN_USAGE`.
+acceptance ledger, `FAILURE_SUMMARY`/`FAILURE_PROJECTION` и итоговый статус. К
+каждой закрытой или отклонённой попытке также сохраняется `TOKEN_USAGE`.
 
 `DONE` разрешён только при независимых `SPEC: PASS`, `CODE_QUALITY: PASS` и
 достаточном `ACCEPTED` evidence по каждому acceptance criterion.

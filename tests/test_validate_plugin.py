@@ -18,6 +18,10 @@ SPEC.loader.exec_module(VALIDATE_PLUGIN)
 
 
 class ValidatePluginTest(unittest.TestCase):
+    def test_runtime_contract_includes_opaque_reject_diagnostic_gate(self) -> None:
+        """Published runtime must retain the bounded raw-free diagnostic rule."""
+        VALIDATE_PLUGIN.validate(PLUGIN_ROOT)
+
     def test_validates_discoverable_qwen_delivery_extension(self) -> None:
         VALIDATE_PLUGIN.validate_qwen_delivery_extension(REPOSITORY_ROOT)
 

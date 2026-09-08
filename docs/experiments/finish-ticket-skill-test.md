@@ -170,3 +170,21 @@ queue и назначил `JOB_REJECTED` follow-up того же Verifier. Вс�
 
 Это проверяет решения Controller; техническое enforcement Sandbox queue
 отдельно подтверждается на следующем реальном ticket.
+
+## RED версии 1.12: непрозрачный aggregate reject
+
+Pressure scenario: static review возвращает `SPEC: PASS` и `CODE_QUALITY: PASS`,
+но targeted acceptance падает на общем boolean без scenario-level output. Это
+доказывает reject, но не позволяет назвать primary failure или следующий repair.
+
+## GREEN-критерии версии 1.12
+
+Controller обязан:
+
+1. сохранить `REJECTED` и `FAILURE_EVIDENCE: INCOMPLETE`;
+2. разрешить один follow-up существующему Implementer только для diagnostic test;
+3. создать один targeted `TEST_PERMIT` и сохранить raw-free
+   `FAILURE_PROJECTION`;
+4. не создавать новый role-agent, repair, Verifier или full suite до projection;
+5. при повторно непрозрачном результате вернуть
+   `BLOCKED: DIAGNOSTIC_EVIDENCE_INCOMPLETE`.
