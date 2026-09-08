@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProofLoop QWEN_RECON_REPORT",
+  "type": "object",
+  "required": ["status", "baseline", "facts", "state_owner", "callback_boundary", "acceptance_risk"],
+  "properties": {
+    "status": {"enum": ["EVIDENCE_FOUND", "BLOCKED", "QWEN_UNUSABLE"]},
+    "baseline": {"type": "string", "minLength": 1},
+    "facts": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["file", "line", "fact"],
+        "properties": {
+          "file": {"type": "string", "minLength": 1},
+          "line": {"type": "integer", "minimum": 1},
+          "fact": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "state_owner": {"type": "string", "minLength": 1},
+    "callback_boundary": {"type": "string", "minLength": 1},
+    "acceptance_risk": {"type": "string", "minLength": 1},
+    "stop_reason": {"type": ["string", "null"]},
+    "writes": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}
