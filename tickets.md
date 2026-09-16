@@ -81,3 +81,110 @@ candidate diff в своей worktree. Codex independently проверяет ca
   targeted test.
 - [ ] Qwen не может commit, merge, cherry-pick, push, full suite или acceptance.
 - [ ] Transfer требует independent Codex review и executable evidence.
+# Tickets: сходимость finish-ticket по урокам Ticket 355
+
+Источник: docs/specs/finish-ticket-ticket-355-convergence.md.
+
+## 6. Разрешённый диагностический цикл
+
+**Что реализовать:** Controller выдаёт ограниченный DIAGNOSTIC_CYCLE_PERMIT, в рамках которого Implementer автономно выполняет несколько информативных экспериментов в утверждённых scope, execution channel и budget.
+
+**Blocked by:** None — can start immediately.
+
+**Status:** ready-for-agent
+
+- [ ] Permit фиксирует scope, channel, budget, время, допустимые изменения, неизменяемые гарантии и stop conditions.
+- [ ] Результат классифицируется как DIAGNOSTIC_PROGRESS, REPAIR_FAILURE, NEXT_DEFECT или INFRASTRUCTURE_BLOCKER.
+- [ ] Новый permit требуется только при изменении security, ownership, side-effect semantics, channel или budget.
+- [ ] Resume сохраняет permit только после сверки baseline и scope.
+
+## 7. Информативный диагностический seam
+
+**Что реализовать:** Для каждого диагностируемого acceptance criterion Controller заранее фиксирует, какие конкурирующие причины различает результат целевой команды, и использует append-only hypothesis ledger только при появлении новой информации.
+
+**Blocked by:** 6. Разрешённый диагностический цикл.
+
+**Status:** ready-for-agent
+
+- [ ] SEAM_FEASIBILITY содержит минимальный raw-free контракт различения причин отказа.
+- [ ] Для многостадийной операции evidence сохраняет первую failed stage и закрытый reason code; для сравнения — обе стороны до assertion.
+- [ ] Две попытки без нового различающего evidence требуют control point.
+- [ ] Новая локализация того же symptom не ошибочно становится DESIGN_GAP или повторной root cause.
+
+## 8. Review подготовленного кандидата и validity evidence
+
+**Что реализовать:** Implementer собирает диагностические RED/GREEN внутри разрешённого цикла, затем независимый Reviewer оценивает подготовленный candidate и затронутые инварианты. Надёжное evidence повторно используется только при неизменных значимых зависимостях.
+
+**Blocked by:** 6. Разрешённый диагностический цикл; 7. Информативный диагностический seam.
+
+**Status:** ready-for-agent
+
+- [ ] Диагностический evidence не требует предварительного static PASS.
+- [ ] Reviewer получает candidate delta, связанные criteria и изменённые инварианты, не повторяя неизменившиеся проверки автоматически.
+- [ ] Receipt хранит candidate, тест, build/execution configuration, required environment, команду, executed set и результат.
+- [ ] Изменение значимой зависимости делает receipt непригодным для переиспользования.
+
+## 9. Execution channels и классификация тестов
+
+**Что реализовать:** Каждый execution path ticket получает универсальную характеристику channel, а tests, запускающие side-effectful или interactive path, явно классифицируются по наблюдаемому поведению.
+
+**Blocked by:** 6. Разрешённый диагностический цикл.
+
+**Status:** ready-for-agent
+
+- [ ] Execution receipt объявляет один channel для каждого вида evidence.
+- [ ] Channel определяет policy side effects, timeout, identity receipt и допустимый scope без платформенных специальных случаев.
+- [ ] Static contract обнаруживает транзитивный вызов неподходящего channel в изолированном suite.
+- [ ] Environment failure до целевой команды получает INFRASTRUCTURE_BLOCKER, а не product verdict.
+
+## 10. Receipts выбора и исполнения тестов
+
+**Что реализовать:** Controller получает отдельные доказательства discovery и фактического execution test cases, поэтому parameterization и ограничения adapter не маскируются под успешную или неуспешную проверку.
+
+**Blocked by:** 9. Execution channels и классификация тестов.
+
+**Status:** ready-for-agent
+
+- [ ] DISCOVERY_RECEIPT хранит найденные cases и критерий выбора.
+- [ ] EXECUTION_RECEIPT хранит реально executed cases, counts, command и result.
+- [ ] Расхождение receipts формирует честный status неполноты evidence.
+- [ ] Controller выбирает другой evidence seam либо блокирует ticket, не создавая retry loop на основании одного exit code.
+
+## 11. Semantic diff gate production-контрактов
+
+**Что реализовать:** Перед дорогой verification Controller выявляет каждый изменённый production contract и требует доказать его owner, допустимые и запрещённые transitions, production consumer и regression.
+
+**Blocked by:** 6. Разрешённый диагностический цикл.
+
+**Status:** ready-for-agent
+
+- [ ] Production semantic delta не может быть описан как test-only patch.
+- [ ] Для каждого изменённого контракта фиксируются owner, transitions и consumer evidence.
+- [ ] Отсутствие regression или consumer evidence блокирует full/release verification.
+- [ ] Gate не расширяет acceptance surface без явного решения и доказательства.
+
+## 12. Raw-free PASS projection и identity evidence
+
+**Что реализовать:** Aggregate acceptance публикует безопасный машиночитаемый projection не только при REJECTED, но и при PASS, связывая результат с текущим кандидатом и execution channel.
+
+**Blocked by:** 9. Execution channels и классификация тестов; 10. Receipts выбора и исполнения тестов.
+
+**Status:** ready-for-agent
+
+- [ ] PASS projection содержит criterion/scenario counts, required controls, cleanup/evidence status, identity и artifact reference.
+- [ ] REJECTED сохраняет совместимый raw-free failure projection.
+- [ ] Projection не содержит prompt, secret, customer data, raw command output или exception text.
+- [ ] Verifier может установить достаточность PASS без ручного чтения assertion source.
+
+## 13. Модульный protocol и сценарийные fixtures
+
+**Что реализовать:** finish-ticket поставляет короткий основной lifecycle и условно загружаемые runtime, diagnostic и resume ветви; behaviour fixtures подтверждают совместную работу новых gates и отсутствие ложного DONE.
+
+**Blocked by:** 6. Разрешённый диагностический цикл; 7. Информативный диагностический seam; 8. Review подготовленного кандидата и validity evidence; 9. Execution channels и классификация тестов; 10. Receipts выбора и исполнения тестов; 11. Semantic diff gate production-контрактов; 12. Raw-free PASS projection и identity evidence.
+
+**Status:** ready-for-agent
+
+- [ ] Основной lifecycle не требует загрузки runtime-specific и diagnostic деталей до выбора соответствующей ветви.
+- [ ] NOT_AVAILABLE usage сохраняет честную метрику, но не блокирует работу; недоступная critical model не разрешает молчаливый downgrade.
+- [ ] Версия protocol синхронизирована между canonical source, plugin, human docs и receipts.
+- [ ] Scenario fixtures покрывают следующий defect, infrastructure failure, повтор без нового evidence, resume permit, document-only change и новое security requirement.
