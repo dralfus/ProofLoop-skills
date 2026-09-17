@@ -223,3 +223,13 @@ control point; pre-command infrastructure failure лимит не расходу
 ## Execution channels
 
 Каждый evidence path объявляет channel по наблюдаемому поведению: `isolated`, `side-effectful` или `interactive`. Изолированный suite не может транзитивно вызвать side-effectful или interactive path. Environment failure до команды — `INFRASTRUCTURE_BLOCKER`, а не verdict продукта. Полная схема — в [reference execution channels](../plugins/agentic-development-workflow/skills/finish-ticket/references/execution-channels.md).
+
+
+## Receipts тестов
+
+Controller хранит отдельно найденные и реально выполненные test cases. Их расхождение — `EVIDENCE_INCOMPLETE`, а не основание для retry по exit code. Схема: [reference test receipts](../plugins/agentic-development-workflow/skills/finish-ticket/references/test-receipts.md).
+
+
+## Semantic diff gate
+
+До дорогой verification каждый production semantic delta требует owner, transitions, consumer и regression evidence. Неполный contract блокирует verification. Схема: [semantic diff](../plugins/agentic-development-workflow/skills/finish-ticket/references/semantic-diff.md).

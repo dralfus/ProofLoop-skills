@@ -141,12 +141,12 @@ candidate diff в своей worktree. Codex independently проверяет ca
 
 **Blocked by:** 9. Execution channels и классификация тестов.
 
-**Status:** ready-for-agent
+**Status:** implemented, local validation complete
 
-- [ ] DISCOVERY_RECEIPT хранит найденные cases и критерий выбора.
-- [ ] EXECUTION_RECEIPT хранит реально executed cases, counts, command и result.
-- [ ] Расхождение receipts формирует честный status неполноты evidence.
-- [ ] Controller выбирает другой evidence seam либо блокирует ticket, не создавая retry loop на основании одного exit code.
+- [x] DISCOVERY_RECEIPT хранит найденные cases и критерий выбора.
+- [x] EXECUTION_RECEIPT хранит реально executed cases, counts, command и result.
+- [x] Расхождение receipts формирует честный status неполноты evidence.
+- [x] Controller выбирает другой evidence seam либо блокирует ticket, не создавая retry loop на основании одного exit code.
 
 ## 11. Semantic diff gate production-контрактов
 
@@ -154,12 +154,12 @@ candidate diff в своей worktree. Codex independently проверяет ca
 
 **Blocked by:** 6. Разрешённый диагностический цикл.
 
-**Status:** ready-for-agent
+**Status:** implemented, local validation complete
 
-- [ ] Production semantic delta не может быть описан как test-only patch.
-- [ ] Для каждого изменённого контракта фиксируются owner, transitions и consumer evidence.
-- [ ] Отсутствие regression или consumer evidence блокирует full/release verification.
-- [ ] Gate не расширяет acceptance surface без явного решения и доказательства.
+- [x] Production semantic delta не может быть описан как test-only patch.
+- [x] Для каждого изменённого контракта фиксируются owner, transitions и consumer evidence.
+- [x] Отсутствие regression или consumer evidence блокирует full/release verification.
+- [x] Gate не расширяет acceptance surface без явного решения и доказательства.
 
 ## 12. Raw-free PASS projection и identity evidence
 

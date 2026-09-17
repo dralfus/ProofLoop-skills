@@ -1,0 +1,1 @@
+{"contracts":[{"name":"submit-transition","classification":"production","production_semantic_delta":true,"owner":"transaction","allowed_transitions":["sanitized->submitted"],"forbidden_transitions":["unsanitized->submitted"],"consumer_evidence":"integration-submit","regression_evidence":"targeted-regression"}]}

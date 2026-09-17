@@ -92,6 +92,12 @@ REQUIRED_CONTRACT_TERMS = (
     "EXECUTION_CHANNEL_READY",
     "CHANNEL_POLICY_VIOLATION",
     "references/execution-channels.md",
+    "TEST_EVIDENCE_READY",
+    "EVIDENCE_INCOMPLETE",
+    "references/test-receipts.md",
+    "SEMANTIC_DIFF_READY",
+    "SEMANTIC_DIFF_BLOCKED",
+    "references/semantic-diff.md",
     "QWEN_ASSIST bridge",
     "references/qwen-assist.md",
     "семь вызовов на ticket",
@@ -794,6 +800,91 @@ def execution_receipt_decision(payload: object) -> dict[str, object]:
         return execution_channel_result("CHANNEL_POLICY_VIOLATION", "TRANSITIVE_CHANNEL_MISMATCH")
     return execution_channel_result("EXECUTION_CHANNEL_READY")
 
+
+def test_receipts_result(status: str, reason: str | None = None) -> dict[str, object]:
+    result: dict[str, object] = {"status": status}
+    if reason is not None:
+        result["reason"] = reason
+    return result
+
+
+def is_valid_test_case_list(value: object, allow_empty: bool = False) -> bool:
+    return (
+        isinstance(value, list)
+        and (allow_empty or bool(value))
+        and all(is_nonempty_string(case) for case in value)
+        and len(set(value)) == len(value)
+    )
+
+
+def test_receipts_decision(payload: object) -> dict[str, object]:
+    """Compare discovery and execution receipts without retrying or inferring a product verdict."""
+    if not isinstance(payload, dict):
+        return test_receipts_result("EVIDENCE_INCOMPLETE", "MALFORMED_TEST_RECEIPTS")
+    discovery = payload.get("discovery_receipt")
+    execution = payload.get("execution_receipt")
+    if not isinstance(discovery, dict) or not isinstance(execution, dict):
+        return test_receipts_result("EVIDENCE_INCOMPLETE", "MALFORMED_TEST_RECEIPTS")
+    if execution.get("environment_ready") is False and execution.get("target_command_started") is False:
+        return test_receipts_result("INFRASTRUCTURE_BLOCKER", "PRE_COMMAND_ENVIRONMENT_FAILURE")
+    if (
+        not is_nonempty_string(discovery.get("selector"))
+        or not is_valid_test_case_list(discovery.get("discovered_cases"))
+        or execution.get("environment_ready") is not True
+        or execution.get("target_command_started") is not True
+        or not is_verification_command(execution.get("command"))
+        or not is_valid_test_case_list(execution.get("executed_cases"), allow_empty=True)
+        or not isinstance(execution.get("counts"), dict)
+        or set(execution["counts"]) != {"passed", "failed", "skipped"}
+        or not all(isinstance(count, int) and not isinstance(count, bool) and count >= 0 for count in execution["counts"].values())
+        or not is_nonempty_string(execution.get("result"))
+    ):
+        return test_receipts_result("EVIDENCE_INCOMPLETE", "MALFORMED_TEST_RECEIPTS")
+    if set(discovery["discovered_cases"]) != set(execution["executed_cases"]) or sum(execution["counts"].values()) != len(execution["executed_cases"]):
+        return test_receipts_result("EVIDENCE_INCOMPLETE", "DISCOVERY_EXECUTION_MISMATCH")
+    return test_receipts_result("TEST_EVIDENCE_READY")
+
+
+SEMANTIC_CONTRACT_FIELDS = (
+    "name",
+    "classification",
+    "production_semantic_delta",
+    "owner",
+    "allowed_transitions",
+    "forbidden_transitions",
+    "consumer_evidence",
+    "regression_evidence",
+)
+
+
+def semantic_diff_result(status: str, reason: str | None = None) -> dict[str, object]:
+    result: dict[str, object] = {"status": status}
+    if reason is not None:
+        result["reason"] = reason
+    return result
+
+
+def semantic_diff_decision(payload: object) -> dict[str, object]:
+    """Gate expensive verification on declared production-contract evidence."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("contracts"), list) or not payload["contracts"]:
+        return semantic_diff_result("SEMANTIC_DIFF_BLOCKED", "MALFORMED_SEMANTIC_DIFF")
+    for contract in payload["contracts"]:
+        if not isinstance(contract, dict) or not is_nonempty_string(contract.get("name")):
+            return semantic_diff_result("SEMANTIC_DIFF_BLOCKED", "MALFORMED_SEMANTIC_DIFF")
+        if contract.get("production_semantic_delta") is not True:
+            continue
+        if contract.get("classification") == "test-only":
+            return semantic_diff_result("SEMANTIC_DIFF_BLOCKED", "PRODUCTION_DELTA_LABELED_TEST_ONLY")
+        if contract.get("classification") != "production" or not is_nonempty_string(contract.get("owner")):
+            return semantic_diff_result("SEMANTIC_DIFF_BLOCKED", "MALFORMED_SEMANTIC_DIFF")
+        if not is_nonempty_string_list(contract.get("allowed_transitions")) or not is_nonempty_string_list(contract.get("forbidden_transitions")):
+            return semantic_diff_result("SEMANTIC_DIFF_BLOCKED", "MISSING_TRANSITION_EVIDENCE")
+        if not is_nonempty_string(contract.get("consumer_evidence")):
+            return semantic_diff_result("SEMANTIC_DIFF_BLOCKED", "MISSING_CONSUMER_EVIDENCE")
+        if not is_nonempty_string(contract.get("regression_evidence")):
+            return semantic_diff_result("SEMANTIC_DIFF_BLOCKED", "MISSING_REGRESSION_EVIDENCE")
+    return semantic_diff_result("SEMANTIC_DIFF_READY")
+
 def validate_qwen_ledger(
     ledger: list[object], configured_model_id: str
 ) -> tuple[str | None, set[str], bool]:
@@ -1190,10 +1281,18 @@ def main() -> None:
     parser.add_argument("--diagnostic-cycle", type=json.loads)
     parser.add_argument("--prepared-candidate", type=json.loads)
     parser.add_argument("--execution-receipt", type=json.loads)
+    parser.add_argument("--test-receipts", type=json.loads)
+    parser.add_argument("--semantic-diff", type=json.loads)
     parser.add_argument("--qwen-extension-root", type=Path)
     args = parser.parse_args()
     if args.diagnostic_cycle is not None:
         print(json.dumps(diagnostic_cycle_decision(args.diagnostic_cycle), sort_keys=True))
+        return
+    if args.semantic_diff is not None:
+        print(json.dumps(semantic_diff_decision(args.semantic_diff), sort_keys=True))
+        return
+    if args.test_receipts is not None:
+        print(json.dumps(test_receipts_decision(args.test_receipts), sort_keys=True))
         return
     if args.execution_receipt is not None:
         print(json.dumps(execution_receipt_decision(args.execution_receipt), sort_keys=True))

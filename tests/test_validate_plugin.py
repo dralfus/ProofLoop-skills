@@ -811,6 +811,52 @@ class ValidatePluginTest(unittest.TestCase):
         decision = json.loads(result.stdout)
         self.assertEqual(decision["status"], "INFRASTRUCTURE_BLOCKER")
         self.assertEqual(decision["reason"], "PRE_COMMAND_ENVIRONMENT_FAILURE")
+    def test_test_receipts_accept_complete_parameterized_execution(self) -> None:
+        result = self.run_test_receipts_fixture("parameterized-complete")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "TEST_EVIDENCE_READY")
+
+    def test_test_receipts_report_incomplete_evidence_when_discovered_case_did_not_execute(self) -> None:
+        result = self.run_test_receipts_fixture("discovered-case-not-executed")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "EVIDENCE_INCOMPLETE")
+        self.assertEqual(decision["reason"], "DISCOVERY_EXECUTION_MISMATCH")
+
+    def test_test_receipts_mark_pre_command_failure_as_infrastructure(self) -> None:
+        result = self.run_test_receipts_fixture("pre-command-environment-failure")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "INFRASTRUCTURE_BLOCKER")
+        self.assertEqual(decision["reason"], "PRE_COMMAND_ENVIRONMENT_FAILURE")
+    def test_semantic_diff_accepts_complete_production_contract(self) -> None:
+        result = self.run_semantic_diff_fixture("complete-production-contract")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "SEMANTIC_DIFF_READY")
+
+    def test_semantic_diff_blocks_production_delta_labeled_test_only(self) -> None:
+        result = self.run_semantic_diff_fixture("production-delta-labeled-test-only")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "SEMANTIC_DIFF_BLOCKED")
+        self.assertEqual(decision["reason"], "PRODUCTION_DELTA_LABELED_TEST_ONLY")
+
+    def test_semantic_diff_blocks_missing_production_consumer_evidence(self) -> None:
+        result = self.run_semantic_diff_fixture("missing-consumer-evidence")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["reason"], "MISSING_CONSUMER_EVIDENCE")
+
+    def test_semantic_diff_blocks_missing_regression_evidence(self) -> None:
+        result = self.run_semantic_diff_fixture("missing-regression-evidence")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["reason"], "MISSING_REGRESSION_EVIDENCE")
     def test_blocks_without_role_dispatch_or_continuation(self) -> None:
         result = self.run_policy(
             {
@@ -1017,6 +1063,28 @@ class ValidatePluginTest(unittest.TestCase):
     def run_execution_receipt_payload(self, payload: object) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(VALIDATOR), "--execution-receipt", json.dumps(payload)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    def run_test_receipts_fixture(self, name: str) -> subprocess.CompletedProcess[str]:
+        fixture = REPOSITORY_ROOT / "tests" / "fixtures" / "test-receipts" / f"{name}.json"
+        return self.run_test_receipts_payload(json.loads(fixture.read_text(encoding="utf-8")))
+
+    def run_test_receipts_payload(self, payload: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(VALIDATOR), "--test-receipts", json.dumps(payload)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    def run_semantic_diff_fixture(self, name: str) -> subprocess.CompletedProcess[str]:
+        fixture = REPOSITORY_ROOT / "tests" / "fixtures" / "semantic-diff" / f"{name}.json"
+        return self.run_semantic_diff_payload(json.loads(fixture.read_text(encoding="utf-8")))
+
+    def run_semantic_diff_payload(self, payload: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(VALIDATOR), "--semantic-diff", json.dumps(payload)],
             capture_output=True,
             text=True,
             check=False,

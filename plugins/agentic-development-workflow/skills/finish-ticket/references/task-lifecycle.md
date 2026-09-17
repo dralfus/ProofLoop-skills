@@ -508,6 +508,8 @@ flag, cleanup, evidence level, build ID и другие уже разрешён�
 
 Для каждого evidence path Controller сверяет declared и observed channel по [`references/execution-channels.md`](execution-channels.md). Pre-command environment failure — `INFRASTRUCTURE_BLOCKER`; несовпадающее или транзитивно неподходящее поведение — `CHANNEL_POLICY_VIOLATION`; корректный receipt получает `EXECUTION_CHANNEL_READY`.
 
+До product verdict Controller сверяет `DISCOVERY_RECEIPT` и `EXECUTION_RECEIPT` по [`references/test-receipts.md`](test-receipts.md). Неполное совпадение — `EVIDENCE_INCOMPLETE`; полное — `TEST_EVIDENCE_READY`; один exit code не создаёт retry loop.
+
 [`references/diagnostic-cycle.md`](diagnostic-cycle.md). Permit фиксирует
 baseline, scope, execution channel, budget, время, allowed changes, security/
 ownership/side-effect identity, immutable guarantees и stop conditions.
@@ -570,3 +572,6 @@ acceptance ledger, `FAILURE_SUMMARY`/`FAILURE_PROJECTION` и итоговый с
 
 `DONE` разрешён только при независимых `SPEC: PASS`, `CODE_QUALITY: PASS` и
 достаточном `ACCEPTED` evidence по каждому acceptance criterion.
+
+
+До дорогой verification Controller проверяет production semantic delta по [`references/semantic-diff.md`](semantic-diff.md). Полный owner/transitions/consumer/regression contract даёт `SEMANTIC_DIFF_READY`; иначе — `SEMANTIC_DIFF_BLOCKED`.

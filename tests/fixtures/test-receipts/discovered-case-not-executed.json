@@ -1,0 +1,1 @@
+{"discovery_receipt":{"selector":"Suite.*","discovered_cases":["Suite.Case(1)","Suite.Case(2)"]},"execution_receipt":{"environment_ready":true,"target_command_started":true,"command":"python -m unittest suite","executed_cases":["Suite.Case(1)"],"counts":{"passed":1,"failed":0,"skipped":0},"result":"PASS"}}
