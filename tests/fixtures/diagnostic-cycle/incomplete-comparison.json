@@ -1,0 +1,46 @@
+{
+  "permit": {
+    "baseline": "abc123",
+    "scope": ["src/transaction"],
+    "channel": "targeted-test",
+    "max_experiments": 3,
+    "issued_at": "2026-09-17T10:00:00Z",
+    "expires_at": "2026-09-17T11:00:00Z",
+    "allowed_changes": ["test-only-diagnostic-patch"],
+    "semantic_identity": {
+      "security_boundary": "unchanged",
+      "ownership": "unchanged",
+      "side_effect_semantics": "unchanged"
+    },
+    "immutable_guarantees": ["fail-closed"],
+    "stop_conditions": ["repeated-diagnostic-fingerprint"],
+    "diagnostic_seam": {
+      "criterion": "safe-submit",
+      "competing_causes": ["capture-failure", "terminal-publication-failure"],
+      "required_observations": ["first_failed_operation", "reason_code", "observed_result"],
+      "comparison_sides": ["matrix", "direct"]
+    }
+  },
+  "hypothesis_ledger": [
+    {
+      "sequence": 1,
+      "classification": "DIAGNOSTIC_PROGRESS",
+      "symptom": "acceptance_failed",
+      "production_boundary": "protected-send",
+      "hypothesis": "The failure is before submission.",
+      "command": "targeted-test",
+      "outcome": "RED",
+      "next_action": "localize",
+      "first_failed_operation": "capture_text",
+      "reason_code": "empty_text",
+      "observed_result": "empty_text",
+      "comparison": {
+        "matrix": {
+          "first_failed_operation": "capture_text",
+          "reason_code": "empty_text",
+          "observed_result": "empty_text"
+        }
+      }
+    }
+  ]
+}

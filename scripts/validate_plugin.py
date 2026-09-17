@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import re
 from pathlib import Path
@@ -75,9 +76,22 @@ REQUIRED_CONTRACT_TERMS = (
     "JOB_REJECTED",
     "NEXT_CLOSURE",
     "FAILURE_PROJECTION",
-    "FAILURE_EVIDENCE: INCOMPLETE",
-    "DIAGNOSTIC_EVIDENCE_INCOMPLETE",
-    "ровно один test-only diagnostic loop",
+    "DIAGNOSTIC_CYCLE_PERMIT",
+    "DIAGNOSTIC_PROGRESS",
+    "REPAIR_FAILURE",
+    "NEXT_DEFECT",
+    "INFRASTRUCTURE_BLOCKER",
+    "REPEATED_DIAGNOSTIC_FINGERPRINT",
+    "HYPOTHESIS_LEDGER",
+    "diagnostic_seam",
+    "reason_code",
+    "references/diagnostic-cycle.md",
+    "PREPARED_CANDIDATE_READY",
+    "EVIDENCE_STALE",
+    "references/prepared-candidate-review.md",
+    "EXECUTION_CHANNEL_READY",
+    "CHANNEL_POLICY_VIOLATION",
+    "references/execution-channels.md",
     "QWEN_ASSIST bridge",
     "references/qwen-assist.md",
     "семь вызовов на ticket",
@@ -421,6 +435,364 @@ def existing_qwen_terminal_result(ledger: list[object]) -> dict[str, object] | N
         "stop_reason": terminal["reason"],
     }
 
+
+DIAGNOSTIC_CLASSIFICATIONS = frozenset(
+    {"DIAGNOSTIC_PROGRESS", "REPAIR_FAILURE", "NEXT_DEFECT", "INFRASTRUCTURE_BLOCKER"}
+)
+DIAGNOSTIC_OBSERVATION_FIELDS = frozenset(
+    {"first_failed_operation", "reason_code", "observed_result"}
+)
+HYPOTHESIS_LEDGER_FIELDS = (
+    "symptom",
+    "production_boundary",
+    "hypothesis",
+    "command",
+    "outcome",
+    "next_action",
+)
+PERMIT_IDENTITY_FIELDS = (
+    "baseline",
+    "scope",
+    "channel",
+    "max_experiments",
+    "immutable_guarantees",
+    "stop_conditions",
+    "issued_at",
+    "expires_at",
+    "allowed_changes",
+    "semantic_identity",
+    "diagnostic_seam",
+)
+
+
+def is_nonempty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def is_nonempty_string_list(value: object) -> bool:
+    return isinstance(value, list) and bool(value) and all(is_nonempty_string(item) for item in value)
+
+
+def is_valid_semantic_identity(value: object) -> bool:
+    return isinstance(value, dict) and all(
+        is_nonempty_string(value.get(field))
+        for field in ("security_boundary", "ownership", "side_effect_semantics")
+    )
+
+
+def is_valid_permit_interval(issued_at: object, expires_at: object) -> bool:
+    if not is_nonempty_string(issued_at) or not is_nonempty_string(expires_at):
+        return False
+    try:
+        issued = datetime.fromisoformat(issued_at.replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return issued.tzinfo is not None and expires.tzinfo is not None and issued < expires
+
+
+def is_valid_diagnostic_seam(value: object) -> bool:
+    if not isinstance(value, dict) or not is_nonempty_string(value.get("criterion")):
+        return False
+    causes = value.get("competing_causes")
+    observations = value.get("required_observations")
+    sides = value.get("comparison_sides")
+    return (
+        is_nonempty_string_list(causes)
+        and len(causes) >= 2
+        and len(set(causes)) == len(causes)
+        and is_nonempty_string_list(observations)
+        and set(observations).issubset(DIAGNOSTIC_OBSERVATION_FIELDS)
+        and {"first_failed_operation", "reason_code"}.issubset(observations)
+        and isinstance(sides, list)
+        and all(is_nonempty_string(side) for side in sides)
+        and len(set(sides)) == len(sides)
+        and len(sides) in {0, 2}
+    )
+
+
+def diagnostic_cycle_result(
+    status: str,
+    reason: str | None,
+    consumed_experiments: int,
+    max_experiments: int,
+    action: str | None = None,
+) -> dict[str, object]:
+    result: dict[str, object] = {
+        "status": status,
+        "consumed_experiments": consumed_experiments,
+        "remaining_experiments": max_experiments - consumed_experiments,
+    }
+    if reason is not None:
+        result["reason"] = reason
+    if action is not None:
+        result["action"] = action
+    return result
+
+
+def has_required_comparison(entry: dict[str, object], seam: dict[str, object]) -> bool:
+    sides = seam["comparison_sides"]
+    if not sides:
+        return True
+    comparison = entry.get("comparison")
+    if not isinstance(comparison, dict) or set(comparison) != set(sides):
+        return False
+    return all(
+        isinstance(observation, dict)
+        and all(is_nonempty_string(observation.get(field)) for field in seam["required_observations"])
+        for observation in comparison.values()
+    )
+
+
+def has_valid_ledger_context(entry: object, sequence: int) -> bool:
+    return (
+        isinstance(entry, dict)
+        and entry.get("sequence") == sequence
+        and entry.get("classification") in DIAGNOSTIC_CLASSIFICATIONS
+        and all(is_nonempty_string(entry.get(field)) for field in HYPOTHESIS_LEDGER_FIELDS)
+    )
+
+
+def diagnostic_cycle_decision(payload: object) -> dict[str, object]:
+    """Evaluate one bounded diagnostic permit without executing any command."""
+    if not isinstance(payload, dict):
+        return diagnostic_cycle_result("DIAGNOSTIC_CONTROL_POINT", "MALFORMED_DIAGNOSTIC_CYCLE", 0, 0)
+
+    permit = payload.get("permit")
+    if not isinstance(permit, dict):
+        return diagnostic_cycle_result("DIAGNOSTIC_CONTROL_POINT", "MALFORMED_DIAGNOSTIC_CYCLE", 0, 0)
+
+    baseline = permit.get("baseline")
+    scope = permit.get("scope")
+    channel = permit.get("channel")
+    max_experiments = permit.get("max_experiments")
+    issued_at = permit.get("issued_at")
+    expires_at = permit.get("expires_at")
+    seam = permit.get("diagnostic_seam")
+    if (
+        not is_nonempty_string(baseline)
+        or not is_nonempty_string_list(scope)
+        or not is_nonempty_string(channel)
+        or not isinstance(max_experiments, int)
+        or isinstance(max_experiments, bool)
+        or not 1 <= max_experiments <= 3
+        or not is_nonempty_string_list(permit.get("immutable_guarantees"))
+        or not is_nonempty_string_list(permit.get("stop_conditions"))
+        or not is_nonempty_string_list(permit.get("allowed_changes"))
+        or not is_valid_semantic_identity(permit.get("semantic_identity"))
+        or not is_valid_permit_interval(issued_at, expires_at)
+        or not is_valid_diagnostic_seam(seam)
+    ):
+        return diagnostic_cycle_result("DIAGNOSTIC_CONTROL_POINT", "MALFORMED_DIAGNOSTIC_CYCLE", 0, 0)
+
+    permit_identity = {field: permit[field] for field in PERMIT_IDENTITY_FIELDS}
+    prior_consumed = 0
+    resume = payload.get("resume")
+    if resume is not None:
+        if not isinstance(resume, dict) or resume.get("permit_identity") != permit_identity:
+            return diagnostic_cycle_result("DIAGNOSTIC_CONTROL_POINT", "PERMIT_IDENTITY_MISMATCH", 0, max_experiments)
+        prior_consumed = resume.get("consumed_experiments", 0)
+        if (
+            not isinstance(prior_consumed, int)
+            or isinstance(prior_consumed, bool)
+            or not 0 <= prior_consumed <= max_experiments
+        ):
+            return diagnostic_cycle_result("DIAGNOSTIC_CONTROL_POINT", "MALFORMED_DIAGNOSTIC_CYCLE", 0, max_experiments)
+
+    ledger = payload.get("hypothesis_ledger")
+    if not isinstance(ledger, list):
+        return diagnostic_cycle_result("DIAGNOSTIC_CONTROL_POINT", "MALFORMED_HYPOTHESIS_LEDGER", prior_consumed, max_experiments)
+
+    consumed = prior_consumed
+    previous_fingerprint: tuple[str, ...] | None = None
+    for sequence, entry in enumerate(ledger, start=1):
+        if not has_valid_ledger_context(entry, sequence):
+            return diagnostic_cycle_result("DIAGNOSTIC_CONTROL_POINT", "MALFORMED_HYPOTHESIS_LEDGER", consumed, max_experiments)
+        classification = entry["classification"]
+        if classification == "INFRASTRUCTURE_BLOCKER":
+            if entry.get("target_command_started") is not False:
+                return diagnostic_cycle_result("DIAGNOSTIC_CONTROL_POINT", "MALFORMED_INFRASTRUCTURE_BLOCKER", consumed, max_experiments)
+            return diagnostic_cycle_result(
+                "INFRASTRUCTURE_BLOCKER",
+                "PRE_COMMAND_INFRASTRUCTURE_FAILURE",
+                consumed,
+                max_experiments,
+                "REPAIR_INFRASTRUCTURE",
+            )
+
+        observations = tuple(entry.get(field) for field in seam["required_observations"])
+        if not all(is_nonempty_string(value) for value in observations) or not has_required_comparison(entry, seam):
+            return diagnostic_cycle_result("DIAGNOSTIC_CONTROL_POINT", "MALFORMED_SEAM_EVIDENCE", consumed, max_experiments)
+        if consumed >= max_experiments:
+            return diagnostic_cycle_result("DIAGNOSTIC_CONTROL_POINT", "EXPERIMENT_BUDGET_EXCEEDED", consumed, max_experiments)
+
+        consumed += 1
+        fingerprint = tuple(value.strip() for value in observations)
+        if fingerprint == previous_fingerprint:
+            return diagnostic_cycle_result(
+                "DIAGNOSTIC_CONTROL_POINT",
+                "REPEATED_DIAGNOSTIC_FINGERPRINT",
+                consumed,
+                max_experiments,
+            )
+        previous_fingerprint = fingerprint
+
+    if consumed == max_experiments:
+        return diagnostic_cycle_result("DIAGNOSTIC_CONTROL_POINT", "EXPERIMENT_BUDGET_EXHAUSTED", consumed, max_experiments)
+    return diagnostic_cycle_result("DIAGNOSTIC_CYCLE_ACTIVE", None, consumed, max_experiments, "CONTINUE_DIAGNOSTICS")
+PREPARED_CANDIDATE_CONTEXT_FIELDS = (
+    "build_configuration",
+    "execution_configuration",
+    "required_environment",
+)
+
+
+def prepared_candidate_result(status: str, reason: str | None = None, action: str | None = None) -> dict[str, object]:
+    result: dict[str, object] = {"status": status}
+    if reason is not None:
+        result["reason"] = reason
+    if action is not None:
+        result["action"] = action
+    return result
+
+
+def is_valid_prepared_context(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and is_nonempty_string(value.get("build_configuration"))
+        and is_nonempty_string(value.get("execution_configuration"))
+        and is_nonempty_string_list(value.get("required_environment"))
+    )
+
+
+def is_valid_prepared_candidate(candidate: object) -> bool:
+    if not isinstance(candidate, dict):
+        return False
+    evidence = candidate.get("diagnostic_evidence")
+    return (
+        is_nonempty_string(candidate.get("identity"))
+        and is_nonempty_string_list(candidate.get("scope_delta"))
+        and is_nonempty_string_list(candidate.get("criteria"))
+        and is_nonempty_string_list(candidate.get("invariants"))
+        and isinstance(evidence, dict)
+        and is_reproducible_red(evidence.get("red"))
+        and is_green_evidence(evidence.get("green"))
+        and is_valid_prepared_context(candidate.get("evidence_context"))
+    )
+
+
+def has_matching_fresh_review(verdict: object, candidate_identity: str) -> bool:
+    return (
+        has_fresh_read_only_reviewer(verdict)
+        and isinstance(verdict, dict)
+        and verdict.get("candidate_identity") == candidate_identity
+        and verdict.get("spec") == "PASS"
+        and verdict.get("code_quality") == "PASS"
+    )
+
+
+def receipt_staleness_reason(receipt: object, candidate: dict[str, object]) -> str | None:
+    if not isinstance(receipt, dict):
+        return "MALFORMED_EVIDENCE_RECEIPT"
+    context = candidate["evidence_context"]
+    required = ("candidate_identity", "test_id", "command", "executed_set", "result", *PREPARED_CANDIDATE_CONTEXT_FIELDS)
+    if (
+        not all(field in receipt for field in required)
+        or not is_nonempty_string(receipt.get("test_id"))
+        or not is_verification_command(receipt.get("command"))
+        or not is_nonempty_string_list(receipt.get("executed_set"))
+        or receipt.get("result") != "GREEN"
+        or not is_nonempty_string_list(receipt.get("required_environment"))
+    ):
+        return "MALFORMED_EVIDENCE_RECEIPT"
+    if receipt["candidate_identity"] != candidate["identity"]:
+        return "CANDIDATE_IDENTITY_CHANGED"
+    if receipt["build_configuration"] != context["build_configuration"]:
+        return "BUILD_CONFIGURATION_CHANGED"
+    if receipt["execution_configuration"] != context["execution_configuration"]:
+        return "EXECUTION_CONFIGURATION_CHANGED"
+    if receipt["required_environment"] != context["required_environment"]:
+        return "REQUIRED_ENVIRONMENT_CHANGED"
+    return None
+
+
+def prepared_candidate_decision(payload: object) -> dict[str, object]:
+    """Validate reusable evidence for one candidate; never execute or reuse it automatically."""
+    if not isinstance(payload, dict) or not is_valid_prepared_candidate(payload.get("candidate")):
+        return prepared_candidate_result("REVIEW_REQUIRED", "MALFORMED_PREPARED_CANDIDATE")
+
+    candidate = payload["candidate"]
+    candidate_identity = candidate["identity"]
+    if not has_matching_fresh_review(payload.get("reviewer_verdict"), candidate_identity):
+        return prepared_candidate_result("REVIEW_REQUIRED", "FRESH_REVIEW_MISSING")
+
+    receipts = payload.get("evidence_receipts")
+    if not isinstance(receipts, list) or not receipts:
+        return prepared_candidate_result("EVIDENCE_STALE", "MISSING_EVIDENCE_RECEIPT")
+    for receipt in receipts:
+        reason = receipt_staleness_reason(receipt, candidate)
+        if reason is not None:
+            return prepared_candidate_result("EVIDENCE_STALE", reason)
+    return prepared_candidate_result("PREPARED_CANDIDATE_READY", action="REQUEST_VERIFIER")
+
+EXECUTION_CHANNEL_IDS = frozenset({"isolated", "side-effectful", "interactive"})
+EXECUTION_SIDE_EFFECT_POLICIES = frozenset({"none", "controlled", "interactive"})
+
+
+def execution_channel_result(status: str, reason: str | None = None) -> dict[str, object]:
+    result: dict[str, object] = {"status": status}
+    if reason is not None:
+        result["reason"] = reason
+    return result
+
+
+def behavior_channel(behavior: object) -> str | None:
+    if (
+        not isinstance(behavior, dict)
+        or set(behavior) != {"side_effectful", "interactive"}
+        or not isinstance(behavior["side_effectful"], bool)
+        or not isinstance(behavior["interactive"], bool)
+    ):
+        return None
+    if behavior["interactive"]:
+        return "interactive"
+    if behavior["side_effectful"]:
+        return "side-effectful"
+    return "isolated"
+
+
+def is_valid_execution_channel(channel: object) -> bool:
+    return (
+        isinstance(channel, dict)
+        and channel.get("channel_id") in EXECUTION_CHANNEL_IDS
+        and channel.get("side_effect_policy") in EXECUTION_SIDE_EFFECT_POLICIES
+        and isinstance(channel.get("timeout_seconds"), int)
+        and not isinstance(channel.get("timeout_seconds"), bool)
+        and channel["timeout_seconds"] > 0
+        and isinstance(channel.get("identity_required"), bool)
+        and is_nonempty_string_list(channel.get("allowed_scope"))
+    )
+
+
+def execution_receipt_decision(payload: object) -> dict[str, object]:
+    """Classify one declared execution channel without executing its command."""
+    if not isinstance(payload, dict) or not is_valid_execution_channel(payload.get("channel")):
+        return execution_channel_result("CHANNEL_POLICY_VIOLATION", "MALFORMED_EXECUTION_RECEIPT")
+    if payload.get("environment_ready") is False and payload.get("target_command_started") is False:
+        return execution_channel_result("INFRASTRUCTURE_BLOCKER", "PRE_COMMAND_ENVIRONMENT_FAILURE")
+    if payload.get("environment_ready") is not True or payload.get("target_command_started") is not True:
+        return execution_channel_result("CHANNEL_POLICY_VIOLATION", "MALFORMED_EXECUTION_RECEIPT")
+
+    channel = payload["channel"]
+    observed = behavior_channel(payload.get("observed_behavior"))
+    if observed is None or observed != channel["channel_id"]:
+        return execution_channel_result("CHANNEL_POLICY_VIOLATION", "OBSERVED_BEHAVIOR_MISMATCH")
+    invocations = payload.get("transitive_invocations")
+    if not isinstance(invocations, list):
+        return execution_channel_result("CHANNEL_POLICY_VIOLATION", "MALFORMED_EXECUTION_RECEIPT")
+    if channel["channel_id"] == "isolated" and any(behavior_channel(item) != "isolated" for item in invocations):
+        return execution_channel_result("CHANNEL_POLICY_VIOLATION", "TRANSITIVE_CHANNEL_MISMATCH")
+    return execution_channel_result("EXECUTION_CHANNEL_READY")
 
 def validate_qwen_ledger(
     ledger: list[object], configured_model_id: str
@@ -815,8 +1187,20 @@ def main() -> None:
     parser.add_argument("plugin_root", type=Path, nargs="?")
     parser.add_argument("--capabilities", type=json.loads)
     parser.add_argument("--qwen-repair", type=json.loads)
+    parser.add_argument("--diagnostic-cycle", type=json.loads)
+    parser.add_argument("--prepared-candidate", type=json.loads)
+    parser.add_argument("--execution-receipt", type=json.loads)
     parser.add_argument("--qwen-extension-root", type=Path)
     args = parser.parse_args()
+    if args.diagnostic_cycle is not None:
+        print(json.dumps(diagnostic_cycle_decision(args.diagnostic_cycle), sort_keys=True))
+        return
+    if args.execution_receipt is not None:
+        print(json.dumps(execution_receipt_decision(args.execution_receipt), sort_keys=True))
+        return
+    if args.prepared_candidate is not None:
+        print(json.dumps(prepared_candidate_decision(args.prepared_candidate), sort_keys=True))
+        return
     if args.qwen_repair is not None:
         print(json.dumps(qwen_repair_decision(args.qwen_repair), sort_keys=True))
         return

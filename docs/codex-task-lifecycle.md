@@ -200,12 +200,17 @@ Controller/Reviewer/Verifier и total ticket. Используются толь�
 usage/trace counters; недоступные значения отмечаются `NOT_AVAILABLE`.
 После `REJECTED` он также показывает `FAILURE_SUMMARY`: primary failure,
 подтверждённые cascade failures, in-scope verdict и следующий focused loop.
-Если aggregate acceptance-test вернул только общий boolean, Controller сначала
-запрашивает один test-only diagnostic loop с raw-free `FAILURE_PROJECTION`.
-Этот loop использует targeted `TEST_PERMIT`, follow-up исходного Implementer и
-не открывает repair, Verifier или full suite. Второе отсутствие usable
-projection завершает ticket как `BLOCKED` с
-`DIAGNOSTIC_EVIDENCE_INCOMPLETE`.
+Если aggregate acceptance-test вернул только общий boolean, Controller создаёт
+ограниченный `DIAGNOSTIC_CYCLE_PERMIT`: от одного до трёх test-only experiment
+с raw-free `FAILURE_PROJECTION`. До первого запуска он фиксирует
+`diagnostic_seam`: criterion, конкурирующие причины, минимальные observations и
+обе стороны требуемого сравнения. Единственный `HYPOTHESIS_LEDGER` хранит
+непрерывную sequence, hypothesis и первую отказавшую операцию с reason code.
+Новый role-agent, repair, Verifier и full suite до usable projection запрещены.
+Повтор fingerprint два раза, исчерпание лимита или resume с иной identity дают
+control point; pre-command infrastructure failure лимит не расходует. После локального GREEN Controller оформляет candidate с identity, scope, criteria, invariants и diagnostic RED/GREEN; receipt сравнивается только с тем же identity и evidence context, иначе `EVIDENCE_STALE`. Полная
+схема — в канонической
+[reference диагностического цикла](../plugins/agentic-development-workflow/skills/finish-ticket/references/diagnostic-cycle.md).
 
 ## Ручной аудит test suite
 
@@ -213,3 +218,8 @@ projection завершает ticket как `BLOCKED` с
 участвует в обычном lifecycle ticket. Он измеряет duration и flaky evidence,
 строит карту `test -> risk -> seam` и готовит proposals с replacement proof.
 Он не удаляет тесты, не меняет CI/quarantine и не создаёт agents.
+
+
+## Execution channels
+
+Каждый evidence path объявляет channel по наблюдаемому поведению: `isolated`, `side-effectful` или `interactive`. Изолированный suite не может транзитивно вызвать side-effectful или interactive path. Environment failure до команды — `INFRASTRUCTURE_BLOCKER`, а не verdict продукта. Полная схема — в [reference execution channels](../plugins/agentic-development-workflow/skills/finish-ticket/references/execution-channels.md).

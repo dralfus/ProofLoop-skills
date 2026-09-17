@@ -1,0 +1,1 @@
+{"channel":{"channel_id":"isolated","side_effect_policy":"none","timeout_seconds":60,"identity_required":true,"allowed_scope":["test-only"]},"environment_ready":true,"target_command_started":true,"observed_behavior":{"side_effectful":false,"interactive":false},"transitive_invocations":[{"side_effectful":true,"interactive":true}]}

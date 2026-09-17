@@ -91,38 +91,36 @@ candidate diff в своей worktree. Codex independently проверяет ca
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** implemented, local validation complete.
 
-- [ ] Permit фиксирует scope, channel, budget, время, допустимые изменения, неизменяемые гарантии и stop conditions.
-- [ ] Результат классифицируется как DIAGNOSTIC_PROGRESS, REPAIR_FAILURE, NEXT_DEFECT или INFRASTRUCTURE_BLOCKER.
-- [ ] Новый permit требуется только при изменении security, ownership, side-effect semantics, channel или budget.
-- [ ] Resume сохраняет permit только после сверки baseline и scope.
-
+- [x] Permit фиксирует baseline, scope, channel, budget, время, допустимые изменения, неизменяемые гарантии, semantic identity и stop conditions.
+- [x] Результат классифицируется как DIAGNOSTIC_PROGRESS, REPAIR_FAILURE, NEXT_DEFECT или INFRASTRUCTURE_BLOCKER.
+- [x] Resume требует полного совпадения permit identity; изменение security, ownership, side-effect semantics, channel, budget, scope, allowed changes или времени требует нового permit.
+- [x] Pre-command infrastructure failure не расходует budget; повтор fingerprint и исчерпание budget возвращают DIAGNOSTIC_CONTROL_POINT.
 ## 7. Информативный диагностический seam
 
 **Что реализовать:** Для каждого диагностируемого acceptance criterion Controller заранее фиксирует, какие конкурирующие причины различает результат целевой команды, и использует append-only hypothesis ledger только при появлении новой информации.
 
 **Blocked by:** 6. Разрешённый диагностический цикл.
 
-**Status:** ready-for-agent
+**Status:** implemented, local validation complete.
 
-- [ ] SEAM_FEASIBILITY содержит минимальный raw-free контракт различения причин отказа.
-- [ ] Для многостадийной операции evidence сохраняет первую failed stage и закрытый reason code; для сравнения — обе стороны до assertion.
-- [ ] Две попытки без нового различающего evidence требуют control point.
-- [ ] Новая локализация того же symptom не ошибочно становится DESIGN_GAP или повторной root cause.
-
+- [x] SEAM_FEASIBILITY содержит минимальный raw-free контракт различения причин отказа.
+- [x] Для многостадийной операции evidence сохраняет первую failed stage и закрытый reason code; для comparison — обе стороны до assertion.
+- [x] Две попытки без нового различающего evidence требуют control point.
+- [x] Новая локализация того же symptom не ошибочно становится DESIGN_GAP или повторной root cause.
 ## 8. Review подготовленного кандидата и validity evidence
 
 **Что реализовать:** Implementer собирает диагностические RED/GREEN внутри разрешённого цикла, затем независимый Reviewer оценивает подготовленный candidate и затронутые инварианты. Надёжное evidence повторно используется только при неизменных значимых зависимостях.
 
 **Blocked by:** 6. Разрешённый диагностический цикл; 7. Информативный диагностический seam.
 
-**Status:** ready-for-agent
+**Status:** implemented, local validation complete
 
-- [ ] Диагностический evidence не требует предварительного static PASS.
-- [ ] Reviewer получает candidate delta, связанные criteria и изменённые инварианты, не повторяя неизменившиеся проверки автоматически.
-- [ ] Receipt хранит candidate, тест, build/execution configuration, required environment, команду, executed set и результат.
-- [ ] Изменение значимой зависимости делает receipt непригодным для переиспользования.
+- [x] Диагностический evidence не требует предварительного static PASS.
+- [x] Reviewer получает candidate delta, связанные criteria и изменённые инварианты, не повторяя неизменившиеся проверки автоматически.
+- [x] Receipt хранит candidate, тест, build/execution configuration, required environment, команду, executed set и результат.
+- [x] Изменение значимой зависимости делает receipt непригодным для переиспользования.
 
 ## 9. Execution channels и классификация тестов
 
@@ -130,12 +128,12 @@ candidate diff в своей worktree. Codex independently проверяет ca
 
 **Blocked by:** 6. Разрешённый диагностический цикл.
 
-**Status:** ready-for-agent
+**Status:** implemented, local validation complete
 
-- [ ] Execution receipt объявляет один channel для каждого вида evidence.
-- [ ] Channel определяет policy side effects, timeout, identity receipt и допустимый scope без платформенных специальных случаев.
-- [ ] Static contract обнаруживает транзитивный вызов неподходящего channel в изолированном suite.
-- [ ] Environment failure до целевой команды получает INFRASTRUCTURE_BLOCKER, а не product verdict.
+- [x] Execution receipt объявляет один channel для каждого вида evidence.
+- [x] Channel определяет policy side effects, timeout, identity receipt и допустимый scope без платформенных специальных случаев.
+- [x] Static contract обнаруживает транзитивный вызов неподходящего channel в изолированном suite.
+- [x] Environment failure до целевой команды получает INFRASTRUCTURE_BLOCKER, а не product verdict.
 
 ## 10. Receipts выбора и исполнения тестов
 

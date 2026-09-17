@@ -691,6 +691,126 @@ class ValidatePluginTest(unittest.TestCase):
                 self.assertEqual(len(decision["ledger"]), 5)
                 self.assertEqual(decision["ledger"][-1]["reason"], stop_reason)
 
+    def test_diagnostic_cycle_continues_when_localization_changes_under_same_symptom(self) -> None:
+        result = self.run_diagnostic_cycle_fixture("continues-through-new-localization")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "DIAGNOSTIC_CYCLE_ACTIVE")
+        self.assertEqual(decision["action"], "CONTINUE_DIAGNOSTICS")
+        self.assertEqual(decision["consumed_experiments"], 2)
+        self.assertEqual(decision["remaining_experiments"], 1)
+
+    def test_diagnostic_cycle_stops_after_two_consecutive_equal_fingerprints(self) -> None:
+        result = self.run_diagnostic_cycle_fixture("repeated-fingerprint-control-point")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "DIAGNOSTIC_CONTROL_POINT")
+        self.assertEqual(decision["reason"], "REPEATED_DIAGNOSTIC_FINGERPRINT")
+        self.assertEqual(decision["consumed_experiments"], 2)
+        self.assertEqual(decision["remaining_experiments"], 1)
+
+    def test_diagnostic_cycle_does_not_charge_pre_command_infrastructure_failure(self) -> None:
+        result = self.run_diagnostic_cycle_fixture("pre-command-infrastructure")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "INFRASTRUCTURE_BLOCKER")
+        self.assertEqual(decision["reason"], "PRE_COMMAND_INFRASTRUCTURE_FAILURE")
+        self.assertEqual(decision["consumed_experiments"], 0)
+        self.assertEqual(decision["remaining_experiments"], 3)
+
+    def test_diagnostic_cycle_requires_resume_identity_to_match_permit(self) -> None:
+        result = self.run_diagnostic_cycle_fixture("resume-identity-mismatch")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "DIAGNOSTIC_CONTROL_POINT")
+        self.assertEqual(decision["reason"], "PERMIT_IDENTITY_MISMATCH")
+        self.assertEqual(decision["consumed_experiments"], 0)
+        self.assertEqual(decision["remaining_experiments"], 3)
+
+    def test_diagnostic_cycle_blocks_incomplete_required_comparison(self) -> None:
+        result = self.run_diagnostic_cycle_fixture("incomplete-comparison")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "DIAGNOSTIC_CONTROL_POINT")
+        self.assertEqual(decision["reason"], "MALFORMED_SEAM_EVIDENCE")
+        self.assertEqual(decision["consumed_experiments"], 0)
+        self.assertEqual(decision["remaining_experiments"], 3)
+
+    def test_diagnostic_cycle_blocks_non_append_only_hypothesis_ledger(self) -> None:
+        result = self.run_diagnostic_cycle_fixture("invalid-ledger-sequence")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "DIAGNOSTIC_CONTROL_POINT")
+        self.assertEqual(decision["reason"], "MALFORMED_HYPOTHESIS_LEDGER")
+        self.assertEqual(decision["consumed_experiments"], 0)
+        self.assertEqual(decision["remaining_experiments"], 3)
+
+    def test_prepared_candidate_accepts_diagnostic_red_green_before_static_review(self) -> None:
+        result = self.run_prepared_candidate_fixture("ready-with-diagnostic-evidence")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "PREPARED_CANDIDATE_READY")
+        self.assertEqual(decision["action"], "REQUEST_VERIFIER")
+
+    def test_prepared_candidate_requires_fresh_read_only_review(self) -> None:
+        result = self.run_prepared_candidate_fixture("missing-review")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "REVIEW_REQUIRED")
+        self.assertEqual(decision["reason"], "FRESH_REVIEW_MISSING")
+
+    def test_prepared_candidate_marks_receipt_stale_after_candidate_identity_changes(self) -> None:
+        result = self.run_prepared_candidate_fixture("stale-candidate")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "EVIDENCE_STALE")
+        self.assertEqual(decision["reason"], "CANDIDATE_IDENTITY_CHANGED")
+
+    def test_prepared_candidate_marks_receipt_stale_after_build_configuration_changes(self) -> None:
+        result = self.run_prepared_candidate_fixture("stale-build-configuration")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "EVIDENCE_STALE")
+        self.assertEqual(decision["reason"], "BUILD_CONFIGURATION_CHANGED")
+    def test_execution_receipt_accepts_isolated_channel_with_observed_noninteractive_behavior(self) -> None:
+        result = self.run_execution_receipt_fixture("isolated-ready")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "EXECUTION_CHANNEL_READY")
+
+    def test_execution_receipt_rejects_side_effectful_behavior_in_isolated_channel(self) -> None:
+        result = self.run_execution_receipt_fixture("isolated-side-effect")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "CHANNEL_POLICY_VIOLATION")
+        self.assertEqual(decision["reason"], "OBSERVED_BEHAVIOR_MISMATCH")
+
+    def test_execution_receipt_rejects_transitive_interactive_call_from_isolated_suite(self) -> None:
+        result = self.run_execution_receipt_fixture("isolated-transitive-interactive")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "CHANNEL_POLICY_VIOLATION")
+        self.assertEqual(decision["reason"], "TRANSITIVE_CHANNEL_MISMATCH")
+
+    def test_execution_receipt_marks_pre_command_environment_failure_as_infrastructure(self) -> None:
+        result = self.run_execution_receipt_fixture("pre-command-environment-failure")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["status"], "INFRASTRUCTURE_BLOCKER")
+        self.assertEqual(decision["reason"], "PRE_COMMAND_ENVIRONMENT_FAILURE")
     def test_blocks_without_role_dispatch_or_continuation(self) -> None:
         result = self.run_policy(
             {
@@ -867,6 +987,40 @@ class ValidatePluginTest(unittest.TestCase):
             check=False,
         )
 
+    def run_diagnostic_cycle_fixture(self, name: str) -> subprocess.CompletedProcess[str]:
+        fixture = REPOSITORY_ROOT / "tests" / "fixtures" / "diagnostic-cycle" / f"{name}.json"
+        return self.run_diagnostic_cycle_payload(json.loads(fixture.read_text(encoding="utf-8")))
+
+    def run_diagnostic_cycle_payload(self, payload: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(VALIDATOR), "--diagnostic-cycle", json.dumps(payload)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def run_prepared_candidate_fixture(self, name: str) -> subprocess.CompletedProcess[str]:
+        fixture = REPOSITORY_ROOT / "tests" / "fixtures" / "prepared-candidate" / f"{name}.json"
+        return self.run_prepared_candidate_payload(json.loads(fixture.read_text(encoding="utf-8")))
+
+    def run_prepared_candidate_payload(self, payload: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(VALIDATOR), "--prepared-candidate", json.dumps(payload)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    def run_execution_receipt_fixture(self, name: str) -> subprocess.CompletedProcess[str]:
+        fixture = REPOSITORY_ROOT / "tests" / "fixtures" / "execution-channel" / f"{name}.json"
+        return self.run_execution_receipt_payload(json.loads(fixture.read_text(encoding="utf-8")))
+
+    def run_execution_receipt_payload(self, payload: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(VALIDATOR), "--execution-receipt", json.dumps(payload)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
     @staticmethod
     def qwen_capabilities() -> dict[str, object]:
         return {

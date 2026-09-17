@@ -196,8 +196,11 @@ regression — `BLOCKED`; повтор пары finding type + normalized root c
 4. Для каждого критерия заполнить `SEAM_FEASIBILITY`: production entry point,
    существующий или явно утверждённый test seam, red-capable команда и граница
    ownership. Если критерий добавляет или меняет injectable boundary, также
-   перечислить production-shaped consumer и его compatibility command.
-   Критерий без применимых полей не готов к implementation.
+   перечислить production-shaped consumer и его compatibility command. Если
+   criterion может потребовать diagnostic permit, до дорогой команды объявить
+   `diagnostic_seam`: конкурирующие причины, минимальные raw-free observations
+   (включая first failed operation и reason code) и две стороны required
+   comparison. Критерий без применимых полей не готов к implementation.
 5. Отделить implementation requirement от `NEW_REQUIREMENT` и `DESIGN_GAP`.
 6. Объявить planned-модели/effort следующих допустимых ролей и причины выбора,
    даже если design gate пока запрещает их spawn.
@@ -499,25 +502,38 @@ flag, cleanup, evidence level, build ID и другие уже разрешён�
 поля. Не выводить prompt, exception text, paths, secret или customer data.
 
 Если `PRIMARY_FAILURE`, `CASCADE_FAILURES` либо `IN_SCOPE` остаются `UNKNOWN`
-именно из-за отсутствия projection, Controller фиксирует
-`FAILURE_EVIDENCE: INCOMPLETE`. Разрешён ровно один test-only diagnostic loop:
+именно из-за отсутствия usable projection, Controller создаёт
+`DIAGNOSTIC_CYCLE_PERMIT` и применяет
+После локального GREEN Controller оформляет candidate и проверяет его свежий review и receipts по [`references/prepared-candidate-review.md`](prepared-candidate-review.md). Диагностический RED/GREEN не требует static PASS; изменение candidate или evidence context возвращает `EVIDENCE_STALE`; точное совпадение даёт `PREPARED_CANDIDATE_READY` и только запрос Verifier.
 
-1. Передать исходному Implementer одним follow-up только diagnostic test patch;
-   production-файлы, ticket status и acceptance ledger не изменяются.
-2. Создать один обычный schema-valid targeted `TEST_PERMIT`; не добавлять в
-   worker неизвестные поля или новый kind. В Controller record отметить
-   `purpose: diagnostic`.
-3. Запустить test один раз и сохранить `FAILURE_PROJECTION` как evidence.
-   Diagnostic loop не расходует новый role-agent launch или fix round.
-4. До projection не запускать Verifier, full suite, live evidence или repair.
-5. Если projection снова отсутствует, raw-free не доказан либо не позволяет
-   установить primary failure, вернуть `BLOCKED` с причиной
-   `DIAGNOSTIC_EVIDENCE_INCOMPLETE`; второй diagnostic loop запрещён.
+Для каждого evidence path Controller сверяет declared и observed channel по [`references/execution-channels.md`](execution-channels.md). Pre-command environment failure — `INFRASTRUCTURE_BLOCKER`; несовпадающее или транзитивно неподходящее поведение — `CHANNEL_POLICY_VIOLATION`; корректный receipt получает `EXECUTION_CHANNEL_READY`.
 
-После полной projection Controller классифицирует первый failure и только затем
-предлагает scoped repair, environment block или design gate. `REJECTED` не
-становится `DONE` и не снимается самим diagnostic loop.
+[`references/diagnostic-cycle.md`](diagnostic-cycle.md). Permit фиксирует
+baseline, scope, execution channel, budget, время, allowed changes, security/
+ownership/side-effect identity, immutable guarantees и stop conditions.
 
+`HYPOTHESIS_LEDGER` — единственная append-only запись experiment. Для каждой
+записи обязательны symptom, production boundary, hypothesis, command, outcome,
+next action и непрерывная sequence. Исполнившийся experiment классифицируется
+как `DIAGNOSTIC_PROGRESS`, `REPAIR_FAILURE` или `NEXT_DEFECT` и содержит
+raw-free `first_failed_operation`, закрытый `reason_code` и observations,
+объявленные `diagnostic_seam`. Если seam объявляет сравнение, evidence содержит
+две стороны до assertion. Изменение fingerprint — новое диагностическое знание,
+даже при прежнем symptom. Pre-command `INFRASTRUCTURE_BLOCKER` не расходует
+лимит и сначала требует восстановления канала.
+
+До usable projection запрещены repair, Verifier, full suite, live evidence и
+новый role-agent. У каждого experiment ровно один test-only patch исходного
+Implementer и один schema-valid targeted `TEST_PERMIT`/job. Два подряд равных
+fingerprint дают `DIAGNOSTIC_CONTROL_POINT` с причиной
+`REPEATED_DIAGNOSTIC_FINGERPRINT`; исчерпание permit и resume с другой
+identity также дают control point. Controller сохраняет evidence и запрашивает
+design decision, scope decision или явное разрешение — следующая попытка по
+инерции запрещена.
+
+После полной projection Controller классифицирует первый failure и только
+затем предлагает scoped repair, environment block или design gate. `REJECTED`
+не становится `DONE` и не снимается самим diagnostic loop.
 ## Token usage report
 
 После каждого `DONE`, `BLOCKED_FOR_DESIGN`, `BLOCKED`, `BUDGET_GATE` и

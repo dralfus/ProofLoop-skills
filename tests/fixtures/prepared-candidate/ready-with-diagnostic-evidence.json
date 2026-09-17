@@ -1,0 +1,15 @@
+{
+  "candidate": {
+    "identity": "candidate-001",
+    "scope_delta": ["src/transaction.py"],
+    "criteria": ["safe-submit"],
+    "invariants": ["fail-closed"],
+    "diagnostic_evidence": {
+      "red": {"command": "python -m unittest targeted", "result": "RED"},
+      "green": [{"command": "python -m unittest targeted", "result": "GREEN"}]
+    },
+    "evidence_context": {"build_configuration": "debug", "execution_configuration": "local", "required_environment": ["test-host"]}
+  },
+  "reviewer_verdict": {"candidate_identity": "candidate-001", "fresh_named": true, "fork": false, "write": false, "tool_classes": ["read", "verify"], "spec": "PASS", "code_quality": "PASS"},
+  "evidence_receipts": [{"candidate_identity": "candidate-001", "test_id": "targeted-safe-submit", "build_configuration": "debug", "execution_configuration": "local", "required_environment": ["test-host"], "command": "python -m unittest targeted", "executed_set": ["safe-submit"], "result": "GREEN"}]
+}
