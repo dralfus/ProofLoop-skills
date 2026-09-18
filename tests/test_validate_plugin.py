@@ -857,6 +857,45 @@ class ValidatePluginTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["reason"], "MISSING_REGRESSION_EVIDENCE")
+    def test_pass_projection_accepts_complete_raw_free_evidence(self) -> None:
+        result = self.run_pass_projection_fixture("complete-pass")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "PASS_PROJECTION_READY")
+
+    def test_pass_projection_blocks_missing_candidate_identity(self) -> None:
+        result = self.run_pass_projection_fixture("missing-identity")
+        self.assertEqual(json.loads(result.stdout)["reason"], "MISSING_IDENTITY")
+
+    def test_pass_projection_blocks_missing_artifact_reference(self) -> None:
+        result = self.run_pass_projection_fixture("missing-artifact")
+        self.assertEqual(json.loads(result.stdout)["reason"], "MISSING_ARTIFACT_REFERENCE")
+
+    def test_pass_projection_blocks_sensitive_field(self) -> None:
+        result = self.run_pass_projection_fixture("sensitive-field")
+        self.assertEqual(json.loads(result.stdout)["reason"], "RAW_FIELD_FORBIDDEN")
+    def test_scenario_fixtures_keep_terminal_state_honest(self) -> None:
+        expected = {"next-defect":"NEXT_DEFECT", "infrastructure":"INFRASTRUCTURE_BLOCKER", "repeated":"DIAGNOSTIC_CONTROL_POINT", "resume":"DIAGNOSTIC_CONTROL_POINT", "document-only":"DOCUMENT_ONLY_READY", "security":"BLOCKED_FOR_DESIGN"}
+        for name, status in expected.items():
+            with self.subTest(name=name):
+                fixture = REPOSITORY_ROOT / "tests" / "fixtures" / "scenario" / f"{name}.json"
+                result = subprocess.run([sys.executable, str(VALIDATOR), "--scenario-fixture", fixture.read_text(encoding="utf-8")], capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["status"], status)
+    def test_pass_projection_rejects_nested_sensitive_field(self) -> None:
+        result = self.run_pass_projection_payload({"candidate_identity":"c","execution_channel":"isolated","artifact_reference":"a","criteria":{"total":1,"passed":1,"exception_text":"secret"},"required_controls":{"cleanup":True},"evidence_status":"verified"})
+        self.assertEqual(json.loads(result.stdout)["reason"], "RAW_FIELD_FORBIDDEN")
+
+    def test_execution_receipt_accepts_project_defined_channel_with_matching_policy(self) -> None:
+        result = self.run_execution_receipt_payload({"channel":{"channel_id":"external","side_effect_policy":"controlled","timeout_seconds":1,"identity_required":True,"allowed_scope":["x"]},"environment_ready":True,"target_command_started":True,"observed_behavior":{"side_effectful":True,"interactive":False},"transitive_invocations":[]})
+        self.assertEqual(json.loads(result.stdout)["status"], "EXECUTION_CHANNEL_READY")
+
+    def test_semantic_diff_requires_input_and_output_states(self) -> None:
+        result = self.run_semantic_diff_payload({"contracts":[{"name":"x","classification":"production","production_semantic_delta":True,"owner":"o","allowed_transitions":["a-b"],"forbidden_transitions":["b-a"],"consumer_evidence":"c","regression_evidence":"r"}]})
+        self.assertEqual(json.loads(result.stdout)["reason"], "MISSING_STATE_EVIDENCE")
+
+    def test_scenario_fixture_composes_pass_projection_gate(self) -> None:
+        result = subprocess.run([sys.executable,str(VALIDATOR),"--scenario-fixture",json.dumps({"event":"pass_projection","projection":{"execution_channel":"isolated","artifact_reference":"a","criteria":{"total":1,"passed":1},"required_controls":{"cleanup":True},"evidence_status":"verified"}})],capture_output=True,text=True,check=False)
+        self.assertEqual(json.loads(result.stdout)["status"], "PASS_PROJECTION_BLOCKED")
     def test_blocks_without_role_dispatch_or_continuation(self) -> None:
         result = self.run_policy(
             {
@@ -1089,6 +1128,14 @@ class ValidatePluginTest(unittest.TestCase):
             text=True,
             check=False,
         )
+    def run_pass_projection_fixture(self, name: str) -> subprocess.CompletedProcess[str]:
+        fixture = REPOSITORY_ROOT / "tests" / "fixtures" / "pass-projection" / f"{name}.json"
+        return subprocess.run([sys.executable, str(VALIDATOR), "--pass-projection", json.dumps(json.loads(fixture.read_text(encoding="utf-8")))], capture_output=True, text=True, check=False)
+    def run_pass_projection_payload(self, payload: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([sys.executable, str(VALIDATOR), "--pass-projection", json.dumps(payload)], capture_output=True, text=True, check=False)
+
+    def run_semantic_diff_payload(self, payload: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([sys.executable, str(VALIDATOR), "--semantic-diff", json.dumps(payload)], capture_output=True, text=True, check=False)
     @staticmethod
     def qwen_capabilities() -> dict[str, object]:
         return {

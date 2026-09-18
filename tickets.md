@@ -126,9 +126,11 @@ candidate diff в своей worktree. Codex independently проверяет ca
 
 **Что реализовать:** Каждый execution path ticket получает универсальную характеристику channel, а tests, запускающие side-effectful или interactive path, явно классифицируются по наблюдаемому поведению.
 
+**Review finding:** channel taxonomy должна принимать `noninteractive`, `privileged`, `external` и project-defined values; side-effect policy обязана согласовываться с наблюдаемым поведением.
+
 **Blocked by:** 6. Разрешённый диагностический цикл.
 
-**Status:** implemented, local validation complete
+**Status:** corrected after review, local validation complete
 
 - [x] Execution receipt объявляет один channel для каждого вида evidence.
 - [x] Channel определяет policy side effects, timeout, identity receipt и допустимый scope без платформенных специальных случаев.
@@ -152,9 +154,11 @@ candidate diff в своей worktree. Codex independently проверяет ca
 
 **Что реализовать:** Перед дорогой verification Controller выявляет каждый изменённый production contract и требует доказать его owner, допустимые и запрещённые transitions, production consumer и regression.
 
+**Review finding:** production contract должен фиксировать input/output states, а не только строковые transitions.
+
 **Blocked by:** 6. Разрешённый диагностический цикл.
 
-**Status:** implemented, local validation complete
+**Status:** corrected after review, local validation complete
 
 - [x] Production semantic delta не может быть описан как test-only patch.
 - [x] Для каждого изменённого контракта фиксируются owner, transitions и consumer evidence.
@@ -165,24 +169,28 @@ candidate diff в своей worktree. Codex independently проверяет ca
 
 **Что реализовать:** Aggregate acceptance публикует безопасный машиночитаемый projection не только при REJECTED, но и при PASS, связывая результат с текущим кандидатом и execution channel.
 
+**Review finding:** raw-free проверка должна рекурсивно запрещать sensitive fields во всех вложенных объектах.
+
 **Blocked by:** 9. Execution channels и классификация тестов; 10. Receipts выбора и исполнения тестов.
 
-**Status:** ready-for-agent
+**Status:** corrected after review, local validation complete
 
-- [ ] PASS projection содержит criterion/scenario counts, required controls, cleanup/evidence status, identity и artifact reference.
-- [ ] REJECTED сохраняет совместимый raw-free failure projection.
-- [ ] Projection не содержит prompt, secret, customer data, raw command output или exception text.
-- [ ] Verifier может установить достаточность PASS без ручного чтения assertion source.
+- [x] PASS projection содержит criterion/scenario counts, required controls, cleanup/evidence status, identity и artifact reference.
+- [x] REJECTED сохраняет совместимый raw-free failure projection.
+- [x] Projection не содержит prompt, secret, customer data, raw command output или exception text.
+- [x] Verifier может установить достаточность PASS без ручного чтения assertion source.
 
 ## 13. Модульный protocol и сценарийные fixtures
 
 **Что реализовать:** finish-ticket поставляет короткий основной lifecycle и условно загружаемые runtime, diagnostic и resume ветви; behaviour fixtures подтверждают совместную работу новых gates и отсутствие ложного DONE.
 
+**Review finding:** scenario fixtures должны композиционно запускать gates и доказывать отсутствие ложного `DONE`, а не отображать имя события в status.
+
 **Blocked by:** 6. Разрешённый диагностический цикл; 7. Информативный диагностический seam; 8. Review подготовленного кандидата и validity evidence; 9. Execution channels и классификация тестов; 10. Receipts выбора и исполнения тестов; 11. Semantic diff gate production-контрактов; 12. Raw-free PASS projection и identity evidence.
 
-**Status:** ready-for-agent
+**Status:** corrected after review, local validation complete
 
-- [ ] Основной lifecycle не требует загрузки runtime-specific и diagnostic деталей до выбора соответствующей ветви.
-- [ ] NOT_AVAILABLE usage сохраняет честную метрику, но не блокирует работу; недоступная critical model не разрешает молчаливый downgrade.
-- [ ] Версия protocol синхронизирована между canonical source, plugin, human docs и receipts.
-- [ ] Scenario fixtures покрывают следующий defect, infrastructure failure, повтор без нового evidence, resume permit, document-only change и новое security requirement.
+- [x] Основной lifecycle не требует загрузки runtime-specific и diagnostic деталей до выбора соответствующей ветви.
+- [x] NOT_AVAILABLE usage сохраняет честную метрику, но не блокирует работу; недоступная critical model не разрешает молчаливый downgrade.
+- [x] Версия protocol синхронизирована между canonical source, plugin, human docs и receipts.
+- [x] Scenario fixtures покрывают следующий defect, infrastructure failure, повтор без нового evidence, resume permit, document-only change и новое security requirement.

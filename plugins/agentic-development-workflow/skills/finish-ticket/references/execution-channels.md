@@ -13,3 +13,4 @@ Receipt обязан фиксировать фактические booleans `sid
 До запуска целевой команды environment failure возвращает `INFRASTRUCTURE_BLOCKER/PRE_COMMAND_ENVIRONMENT_FAILURE`, а не verdict о продукте. Для isolated suite каждая транзитивная invocation также должна быть isolated; иначе это `CHANNEL_POLICY_VIOLATION/TRANSITIVE_CHANNEL_MISMATCH`.
 
 Политика валидирует receipt и не выполняет команду, не создаёт retries и не допускает автоматического перехода к acceptance.
+`channel_id` может быть `noninteractive`, `interactive`, `isolated`, `privileged`, `external` или project-defined string; policy side effects выводится только из observed behavior.

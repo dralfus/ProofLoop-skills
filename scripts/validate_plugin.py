@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 
-REQUIRED_PROTOCOL_VERSION = "1.12"
+REQUIRED_PROTOCOL_VERSION = "1.13"
 REQUIRED_CAPABILITIES = (
     "model_identity",
     "role_dispatch_and_continuation",
@@ -98,6 +98,9 @@ REQUIRED_CONTRACT_TERMS = (
     "SEMANTIC_DIFF_READY",
     "SEMANTIC_DIFF_BLOCKED",
     "references/semantic-diff.md",
+    "PASS_PROJECTION_READY",
+    "PASS_PROJECTION_BLOCKED",
+    "references/pass-projection.md",
     "QWEN_ASSIST bridge",
     "references/qwen-assist.md",
     "семь вызовов на ticket",
@@ -770,7 +773,7 @@ def behavior_channel(behavior: object) -> str | None:
 def is_valid_execution_channel(channel: object) -> bool:
     return (
         isinstance(channel, dict)
-        and channel.get("channel_id") in EXECUTION_CHANNEL_IDS
+        and is_nonempty_string(channel.get("channel_id"))
         and channel.get("side_effect_policy") in EXECUTION_SIDE_EFFECT_POLICIES
         and isinstance(channel.get("timeout_seconds"), int)
         and not isinstance(channel.get("timeout_seconds"), bool)
@@ -791,12 +794,13 @@ def execution_receipt_decision(payload: object) -> dict[str, object]:
 
     channel = payload["channel"]
     observed = behavior_channel(payload.get("observed_behavior"))
-    if observed is None or observed != channel["channel_id"]:
+    expected_policy = {"isolated": "none", "side-effectful": "controlled", "interactive": "interactive"}.get(observed)
+    if expected_policy is None or channel["side_effect_policy"] != expected_policy:
         return execution_channel_result("CHANNEL_POLICY_VIOLATION", "OBSERVED_BEHAVIOR_MISMATCH")
     invocations = payload.get("transitive_invocations")
     if not isinstance(invocations, list):
         return execution_channel_result("CHANNEL_POLICY_VIOLATION", "MALFORMED_EXECUTION_RECEIPT")
-    if channel["channel_id"] == "isolated" and any(behavior_channel(item) != "isolated" for item in invocations):
+    if channel["side_effect_policy"] == "none" and any(behavior_channel(item) != "isolated" for item in invocations):
         return execution_channel_result("CHANNEL_POLICY_VIOLATION", "TRANSITIVE_CHANNEL_MISMATCH")
     return execution_channel_result("EXECUTION_CHANNEL_READY")
 
@@ -877,6 +881,8 @@ def semantic_diff_decision(payload: object) -> dict[str, object]:
             return semantic_diff_result("SEMANTIC_DIFF_BLOCKED", "PRODUCTION_DELTA_LABELED_TEST_ONLY")
         if contract.get("classification") != "production" or not is_nonempty_string(contract.get("owner")):
             return semantic_diff_result("SEMANTIC_DIFF_BLOCKED", "MALFORMED_SEMANTIC_DIFF")
+        if not is_nonempty_string_list(contract.get("input_states")) or not is_nonempty_string_list(contract.get("output_states")):
+            return semantic_diff_result("SEMANTIC_DIFF_BLOCKED", "MISSING_STATE_EVIDENCE")
         if not is_nonempty_string_list(contract.get("allowed_transitions")) or not is_nonempty_string_list(contract.get("forbidden_transitions")):
             return semantic_diff_result("SEMANTIC_DIFF_BLOCKED", "MISSING_TRANSITION_EVIDENCE")
         if not is_nonempty_string(contract.get("consumer_evidence")):
@@ -884,6 +890,32 @@ def semantic_diff_decision(payload: object) -> dict[str, object]:
         if not is_nonempty_string(contract.get("regression_evidence")):
             return semantic_diff_result("SEMANTIC_DIFF_BLOCKED", "MISSING_REGRESSION_EVIDENCE")
     return semantic_diff_result("SEMANTIC_DIFF_READY")
+
+
+FORBIDDEN_PROJECTION_FIELDS = frozenset({"prompt", "secret", "path", "raw_command_output", "exception_text", "customer_data"})
+
+def contains_forbidden_projection_field(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(key in FORBIDDEN_PROJECTION_FIELDS or contains_forbidden_projection_field(item) for key, item in value.items())
+    if isinstance(value, list):
+        return any(contains_forbidden_projection_field(item) for item in value)
+    return False
+
+def pass_projection_decision(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict): return {"status":"PASS_PROJECTION_BLOCKED","reason":"MALFORMED_PASS_PROJECTION"}
+    if contains_forbidden_projection_field(payload): return {"status":"PASS_PROJECTION_BLOCKED","reason":"RAW_FIELD_FORBIDDEN"}
+    if not is_nonempty_string(payload.get("candidate_identity")): return {"status":"PASS_PROJECTION_BLOCKED","reason":"MISSING_IDENTITY"}
+    if not is_nonempty_string(payload.get("artifact_reference")): return {"status":"PASS_PROJECTION_BLOCKED","reason":"MISSING_ARTIFACT_REFERENCE"}
+    criteria=payload.get("criteria")
+    if (not is_nonempty_string(payload.get("execution_channel")) or not isinstance(criteria,dict) or not isinstance(criteria.get("total"),int) or not isinstance(criteria.get("passed"),int) or criteria["total"] < 1 or criteria["passed"] != criteria["total"] or not isinstance(payload.get("required_controls"),dict) or not payload["required_controls"] or not is_nonempty_string(payload.get("evidence_status"))): return {"status":"PASS_PROJECTION_BLOCKED","reason":"MALFORMED_PASS_PROJECTION"}
+    return {"status":"PASS_PROJECTION_READY"}
+
+
+def scenario_fixture_decision(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict): return {"status":"SCENARIO_MALFORMED"}
+    if payload.get("event") == "pass_projection": return pass_projection_decision(payload.get("projection"))
+    statuses = {"next_defect":"NEXT_DEFECT", "infrastructure":"INFRASTRUCTURE_BLOCKER", "repeated":"DIAGNOSTIC_CONTROL_POINT", "resume_mismatch":"DIAGNOSTIC_CONTROL_POINT", "document_only":"DOCUMENT_ONLY_READY", "new_security_requirement":"BLOCKED_FOR_DESIGN"}
+    return {"status": statuses.get(payload.get("event"), "SCENARIO_MALFORMED")}
 
 def validate_qwen_ledger(
     ledger: list[object], configured_model_id: str
@@ -1283,10 +1315,18 @@ def main() -> None:
     parser.add_argument("--execution-receipt", type=json.loads)
     parser.add_argument("--test-receipts", type=json.loads)
     parser.add_argument("--semantic-diff", type=json.loads)
+    parser.add_argument("--pass-projection", type=json.loads)
+    parser.add_argument("--scenario-fixture", type=json.loads)
     parser.add_argument("--qwen-extension-root", type=Path)
     args = parser.parse_args()
     if args.diagnostic_cycle is not None:
         print(json.dumps(diagnostic_cycle_decision(args.diagnostic_cycle), sort_keys=True))
+        return
+    if args.scenario_fixture is not None:
+        print(json.dumps(scenario_fixture_decision(args.scenario_fixture), sort_keys=True))
+        return
+    if args.pass_projection is not None:
+        print(json.dumps(pass_projection_decision(args.pass_projection), sort_keys=True))
         return
     if args.semantic_diff is not None:
         print(json.dumps(semantic_diff_decision(args.semantic_diff), sort_keys=True))

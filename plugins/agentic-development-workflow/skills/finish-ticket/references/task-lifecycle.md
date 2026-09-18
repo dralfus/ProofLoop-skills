@@ -1,6 +1,6 @@
 # Протокол выполнения одного ticket
 
-Версия workflow: `1.12`
+Версия workflow: `1.13`
 
 Это единственный обязательный runtime-протокол skill `finish-ticket`.
 Копии этого файла в проекте не требуются.
@@ -575,3 +575,9 @@ acceptance ledger, `FAILURE_SUMMARY`/`FAILURE_PROJECTION` и итоговый с
 
 
 До дорогой verification Controller проверяет production semantic delta по [`references/semantic-diff.md`](semantic-diff.md). Полный owner/transitions/consumer/regression contract даёт `SEMANTIC_DIFF_READY`; иначе — `SEMANTIC_DIFF_BLOCKED`.
+
+PASS evidence публикуется по [`references/pass-projection.md`](pass-projection.md): raw-free identity/channel/artifact projection даёт `PASS_PROJECTION_READY`, иначе `PASS_PROJECTION_BLOCKED`.
+
+Scenario fixtures проверяются через `--scenario-fixture`; они покрывают next defect, infrastructure failure, repeated evidence, resume mismatch, document-only change и new security requirement без ложного `DONE`.
+
+Scenario fixture обязан композиционно вызвать соответствующий gate; отображение имени события в terminal status недостаточно.

@@ -233,3 +233,10 @@ Controller хранит отдельно найденные и реально в
 ## Semantic diff gate
 
 До дорогой verification каждый production semantic delta требует owner, transitions, consumer и regression evidence. Неполный contract блокирует verification. Схема: [semantic diff](../plugins/agentic-development-workflow/skills/finish-ticket/references/semantic-diff.md).
+
+## Raw-free PASS projection
+
+Verifier принимает итоговую PASS-приёмку только при raw-free projection с candidate identity, execution channel, artifact reference, criterion counts, required controls и evidence status. Projection не содержит prompt, secret, path, raw command output, exception text или customer data. Неполный либо небезопасный receipt означает `PASS_PROJECTION_BLOCKED`; полный — `PASS_PROJECTION_READY`. Схема: [reference PASS projection](../plugins/agentic-development-workflow/skills/finish-ticket/references/pass-projection.md).
+## Scenario fixtures
+
+Версия workflow `1.13`. Scenario fixtures подтверждают честные terminal states и не допускают ложный `DONE`.

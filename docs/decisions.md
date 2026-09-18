@@ -452,3 +452,12 @@ Qwen не выполняет Git-интеграцию, full suite или accepta
 shell/test side effects и без загрязнения worktree другого ticket; метрика не
 содержит код, пути или raw findings. Только после этого измеряется полезность
 малых patch candidates, а не их acceptance.
+
+
+## D021 — Усилить gates Tickets 9–13 после review
+
+Статус: принято 2026-09-18.
+
+Наблюдаемый failure: первые реализации gates проверяли часть формы receipt, но не все semantics: закрытая taxonomy channel, нерекурсивная raw-free проверка, неполная state evidence и scenario fixtures без композиции gates.
+
+Решение: re-open Tickets 9, 11, 12 и 13. Channel taxonomy становится extensible и согласованной с observed behavior; semantic contracts содержат input/output states; PASS projection рекурсивно исключает запрещённые поля; scenario fixtures проходят реальные policy gates и не могут вернуть DONE. Критерий успеха: каждый прежний bypass имеет RED/Green fixture.
