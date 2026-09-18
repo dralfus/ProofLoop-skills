@@ -484,3 +484,38 @@ acceptance authority и stop gates не ослабляются.
 `standard`/`frontier` запусков без роста `REJECTED`, reopen или времени до
 первого подтверждённого GREEN. Critical ticket, включая Ticket 355, не входят
 в сравнение.
+
+## D023 — Проверять current structured-output contract Qwen до ticket recon
+
+Статус: принято 2026-09-18.
+
+Наблюдаемый failure: Ticket 314 завершился на turn limit без
+`structured_output`, а current Qwen Code v0.24.0 документирует
+`--output-format json` как event array с terminal `structured_result`. Старый
+parser принимал только один JSON object и отверг бы успешный current run как
+`INVALID_JSON_OUTPUT`.
+
+Решение: bridge извлекает object только из final `result.structured_result`
+event либо legacy single object. До следующего ticket recon Controller запускает
+отдельный benign schema-smoke в clean worktree без ticket code; только
+schema-valid terminal output разрешает уменьшенный read-only recon. Smoke не
+является evidence или acceptance ticket. Критерий успеха: fixture current event
+array проходит parser, а live smoke подтверждает terminal schema-valid result
+до первого Ticket 314 recon. Launch использует capability-gated `--bare`, но
+не `--safe-mode`, чтобы исключить неявные workspace customizations.
+
+## D024 — Хранить Qwen OpenAI-compatible token в Windows Credential Manager
+
+Статус: принято 2026-09-18.
+
+Наблюдаемый failure: headless `--bare` smoke Qwen v0.24.0 не выбрал auth type,
+а явный `--auth-type openai` остановился до первого turn, потому что token не
+был доступен процессу. Хранение token в project settings, metrics или постоянной
+user environment variable расширяет поверхность раскрытия.
+
+Решение: для `--auth-type openai` wrapper читает Generic Credential текущего
+Windows-пользователя с target `ProofLoop/Qwen/OpenAI`, передаёт secret только
+в `OPENAI_API_KEY` дочернего процесса и в `finally` восстанавливает прежнее
+значение или удаляет variable. Критерий успеха: wrapper и native credential
+helper проходят static tests и PowerShell parse; следующий live smoke не
+получает token в packet, report или metrics.

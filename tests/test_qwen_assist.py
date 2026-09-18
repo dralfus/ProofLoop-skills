@@ -12,6 +12,7 @@ from unittest.mock import Mock
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPOSITORY_ROOT / "scripts" / "qwen_assist.py"
 SPEC = importlib.util.spec_from_file_location("qwen_assist", MODULE_PATH)
+POWERSHELL_WRAPPER = REPOSITORY_ROOT / "scripts" / "invoke_qwen_assist.ps1"
 assert SPEC and SPEC.loader
 QWEN_ASSIST = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(QWEN_ASSIST)
@@ -19,6 +20,7 @@ SPEC.loader.exec_module(QWEN_ASSIST)
 
 QWEN_HELP = """
   -p, --prompt                          Prompt.
+      --bare                            Skip implicit workspace customizations.
   -o, --output-format                   The format of the CLI output.
       --json-schema                     JSON Schema that the model's final output must conform to.
       --worktree                        Start the session inside a git worktree.
@@ -58,6 +60,30 @@ class QwenAssistTest(unittest.TestCase):
         self.assertEqual(result["status"], "BLOCKED_CAPABILITY")
         self.assertEqual(result["missing_capabilities"], ["max_tool_calls"])
 
+    def test_capability_probe_blocks_missing_bare_mode(self) -> None:
+        result = QWEN_ASSIST.probe_qwen_capabilities(QWEN_HELP.replace("--bare", ""))
+
+        self.assertEqual(result["status"], "BLOCKED_CAPABILITY")
+        self.assertEqual(result["missing_capabilities"], ["bare_mode"])
+
+    def test_powershell_wrapper_requires_and_passes_bare_mode(self) -> None:
+        wrapper = POWERSHELL_WRAPPER.read_text(encoding="utf-8")
+        required_markers = wrapper.split("$requiredMarkers = @(", 1)[1].split(")", 1)[0]
+
+        self.assertIn("'--bare'", required_markers)
+        self.assertIn("    '--bare' `", wrapper)
+
+        self.assertIn("[string]$AuthType", wrapper)
+        self.assertIn("'--auth-type'", wrapper)
+        self.assertIn("[string]$CredentialTarget", wrapper)
+        self.assertIn("Get-ProofLoopQwenGenericSecret", wrapper)
+        self.assertIn("Remove-Item Env:OPENAI_API_KEY", wrapper)
+        self.assertIn("OPENAI_BASE_URL", wrapper)
+        self.assertIn("https://llm-dev.gs-labs.ru/api/v1", wrapper)
+        self.assertIn("OPENAI_MODEL", wrapper)
+        self.assertIn("qwen38-flash-next", wrapper)
+        self.assertIn("Remove-Item Env:OPENAI_BASE_URL", wrapper)
+        self.assertIn("Remove-Item Env:OPENAI_MODEL", wrapper)
     def test_recon_runner_builds_read_only_bounded_command_and_rejects_bad_output(self) -> None:
         runner = Mock(return_value=(0, json.dumps(self.recon_report()), ""))
         result = QWEN_ASSIST.run_recon(
@@ -74,6 +100,7 @@ class QwenAssistTest(unittest.TestCase):
         self.assertIn("--prompt", command)
         self.assertIn("plan", command)
         self.assertIn("--exclude-tools", command)
+        self.assertIn("--bare", command)
         self.assertNotIn("--fallback-model", command)
 
         invalid = QWEN_ASSIST.run_recon(
@@ -100,7 +127,33 @@ class QwenAssistTest(unittest.TestCase):
             {"status": "QWEN_UNUSABLE", "reason": "STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT"},
         )
 
+    def test_recon_runner_accepts_current_json_event_array_structured_result(self) -> None:
+        runner = Mock(
+            return_value=(
+                0,
+                json.dumps(
+                    [
+                        {"type": "message", "role": "assistant", "content": "Inspecting scope."},
+                        {"type": "result", "structured_result": self.recon_report()},
+                    ]
+                ),
+                "",
+            )
+        )
+
+        result = QWEN_ASSIST.run_recon(
+            help_text=QWEN_HELP,
+            qwen_command="qwen",
+            prompt="Map one callback.",
+            schema_path="schema.json",
+            worktree="pilot-314",
+            runner=runner,
+        )
+
+        self.assertEqual(result, {"status": "EVIDENCE_FOUND"})
+
     def test_recon_report_requires_three_locatable_facts_and_read_only_fields(self) -> None:
+
         self.assertEqual(QWEN_ASSIST.validate_recon_report(self.recon_report()), {"status": "EVIDENCE_FOUND"})
 
         incomplete = self.recon_report()

@@ -134,6 +134,21 @@ Controller Codex может вызвать Qwen CLI как внешний син
 worktree, limits turns/wall-time/tool-calls и исключение subagents. Если хотя
 бы одной возможности нет, запуск завершается `BLOCKED_CAPABILITY` без fallback.
 
+
+Перед первым recon конкретного ticket Controller выполняет benign schema-smoke
+в clean worktree без ticket code. Он подтверждает only terminal
+structured-output contract и не является evidence или acceptance ticket. Для
+`--output-format json` bridge принимает single JSON object либо object из final
+event `result.structured_result`; transcript и прочие JSON формы не принимаются.
+Непройденный smoke останавливает pilot, а не увеличивает лимит или повторяет
+recon.
+Smoke и recon используют `--bare`, но не `--safe-mode`, чтобы не загружать
+неявные workspace customizations. При `--auth-type openai` обёртка получает
+Generic Credential текущего пользователя `ProofLoop/Qwen/OpenAI`, назначает его
+только `OPENAI_API_KEY` дочернего процесса Qwen и в `finally` восстанавливает
+или удаляет process variable. Отсутствующий credential —
+`INFRASTRUCTURE_BLOCKER` до первого turn; token не входит в ticket packet,
+report или metrics.
 Первый Qwen-вызов читает код из clean fixed-point worktree и возвращает только
 `QWEN_RECON_REPORT`: минимум три факта `file:line -> fact`, state owner,
 callback boundary и acceptance risk. Он не пишет файлы и не запускает shell,

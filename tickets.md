@@ -63,6 +63,10 @@ ticket 355. Codex может подтвердить report и сохранить
 `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`; см.
 `docs/experiments/qwen-assist-ticket-314-pilot.md`.
 
+**Current local blocker (2026-09-18):** benign schema-smoke stopped before the
+first Qwen turn with `No auth type is selected`; Ticket 314 recon was not run.
+See `docs/experiments/qwen-assist-schema-smoke-2026-09-18.md`. This is an
+`INFRASTRUCTURE_BLOCKER`, not a Ticket 314 verdict.
 - [ ] Процедура явно отделяет успешный bridge-pilot от acceptance ticket 314.
 - [ ] Pilot фиксирует baseline, limits, terminal outcome и anonymized metrics.
 - [ ] Нет diff ticket 355, записей Qwen или тестовых side effects.

@@ -16,6 +16,7 @@ MAX_RECON_TOOL_CALLS = 20
 MAX_RECON_WALL_TIME = "10m"
 REQUIRED_CAPABILITY_MARKERS = {
     "non_interactive_prompt": "--prompt",
+    "bare_mode": "--bare",
     "json_output": "--output-format",
     "json_schema": "--json-schema",
     "worktree": "--worktree",
@@ -58,6 +59,7 @@ def build_recon_command(
     """Build one read-only Qwen invocation without a model fallback."""
     return [
         qwen_command,
+        "--bare",
         "--approval-mode",
         "plan",
         "--output-format",
@@ -165,8 +167,16 @@ def parse_terminal_json(stdout: str) -> object:
         parsed = json.loads(stdout)
     except json.JSONDecodeError:
         return None
-    return parsed if isinstance(parsed, dict) else None
+    if isinstance(parsed, dict):
+        return parsed
+    if not isinstance(parsed, list) or not parsed:
+        return None
+    terminal_event = parsed[-1]
+    if not isinstance(terminal_event, dict) or terminal_event.get("type") != "result":
+        return None
+    structured_result = terminal_event.get("structured_result")
 
+    return structured_result if isinstance(structured_result, dict) else None
 
 def next_qwen_attempt(
     ledger: object, candidate: object

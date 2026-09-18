@@ -75,6 +75,8 @@ description: Использовать для реализации или воз�
 - `QWEN_ASSIST` — только внешний bounded worker: до каждого запуска Controller
   читает `references/qwen-assist.md`, делает capability probe и сам проверяет
   его schema-valid результат; Qwen не получает acceptance authority.
+  Перед первым ticket recon он выполняет отдельный benign schema-smoke по этому
+  reference; smoke не является evidence или acceptance ticket.
 - Один процессный skill на роль: Implementer использует TDD либо диагностику;
   Reviewer не оркестрирует; Verifier подтверждает evidence.
 
