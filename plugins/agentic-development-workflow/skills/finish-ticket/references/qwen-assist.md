@@ -56,3 +56,12 @@ commit, merge, cherry-pick, push, full suite или acceptance. Controller
 Полный report остаётся в игнорируемом локальном каталоге проекта. В
 `%LOCALAPPDATA%\ProofLoop Skills\qwen-metrics.jsonl` записываются только тип
 задачи, outcome, attempts, duration, tool calls и stop reason.
+
+## Capture transport
+
+When the host transport cannot reliably retain terminal stdout, Controller uses
+`start_qwen_assist_capture.ps1` and polls
+`get_qwen_assist_capture.ps1`. The child process writes stdout/stderr only in
+local app-data, never in the repository or central metrics. A recon may enter
+the bridge parser only after `COMPLETE` and schema validation of the final
+terminal result.

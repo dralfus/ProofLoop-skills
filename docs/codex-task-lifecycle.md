@@ -263,3 +263,11 @@ Verifier принимает итоговую PASS-приёмку только п
 ## Scenario fixtures
 
 Версия workflow `1.14`. Scenario fixtures подтверждают честные terminal states и не допускают ложный `DONE`.
+
+### Qwen capture transport
+
+If the host transport cannot retain terminal stdout, Controller launches the
+bounded worker with `start_qwen_assist_capture.ps1` and polls it with
+`get_qwen_assist_capture.ps1`. stdout/stderr remain under local app-data;
+`RUNNING` and `COMPLETE_INVALID_OUTPUT` are not ticket evidence. Controller
+parses a report only after `COMPLETE` and final schema validation.

@@ -7,6 +7,7 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 HELPER = REPOSITORY_ROOT / "scripts" / "qwen_credential.ps1"
 CAPTURE_RUNNER = REPOSITORY_ROOT / "scripts" / "start_qwen_assist_capture.ps1"
+CAPTURE_READER = REPOSITORY_ROOT / "scripts" / "get_qwen_assist_capture.ps1"
 
 
 class QwenCredentialTest(unittest.TestCase):
@@ -30,6 +31,19 @@ class QwenCredentialTest(unittest.TestCase):
         self.assertIn("-EncodedCommand", runner)
         self.assertIn("CredentialTarget", runner)
         self.assertNotIn("Get-ProofLoopQwenGenericSecret", runner)
+
+    def test_capture_reader_reports_running_or_terminal_file_output(self) -> None:
+        self.assertTrue(CAPTURE_READER.is_file())
+        reader = CAPTURE_READER.read_text(encoding="utf-8")
+
+        self.assertIn("Get-Process", reader)
+        self.assertIn("RUNNING", reader)
+        self.assertIn("stdout.json", reader)
+        self.assertIn("stderr.txt", reader)
+        self.assertIn("ConvertFrom-Json", reader)
+        self.assertIn("[string]$RunId", reader)
+        self.assertIn("ValidatePattern", reader)
+        self.assertIn("Join-Path $CaptureDirectory $RunId", reader)
 
 
 if __name__ == "__main__":

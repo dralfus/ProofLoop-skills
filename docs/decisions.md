@@ -519,3 +519,33 @@ Windows-пользователя с target `ProofLoop/Qwen/OpenAI`, переда
 значение или удаляет variable. Критерий успеха: wrapper и native credential
 helper проходят static tests и PowerShell parse; следующий live smoke не
 получает token в packet, report или metrics.
+
+## D025 — Preserve Qwen terminal output across host transport boundaries
+
+Status: accepted 2026-09-18.
+
+Observed failure: Qwen completed a bounded recon and left a clean worktree,
+but the host transport did not retain stdout. Without terminal JSON, Controller
+cannot accept a report or retry the ticket pilot by inertia.
+
+Decision: a capture runner starts a hidden child process and writes stdout and
+stderr only in `%LOCALAPPDATA%\ProofLoop Skills\qwen-captures`. Its reader
+reports `RUNNING`, `COMPLETE`, or `COMPLETE_INVALID_OUTPUT`. Only `COMPLETE`
+with a schema-valid final structured result can enter the bridge parser.
+Success criterion: an end-to-end benign smoke completes through start/poll/read
+without a token in command line, repository, or central metrics.
+
+## D025 — Preserve Qwen terminal output across host transport boundaries
+
+Status: accepted 2026-09-18.
+
+Observed failure: Qwen completed a bounded recon and left a clean worktree,
+but the host transport did not retain stdout. Without terminal JSON, Controller
+cannot accept a report or retry the ticket pilot by inertia.
+
+Decision: a capture runner starts a hidden child process and writes stdout and
+stderr only in `%LOCALAPPDATA%\ProofLoop Skills\qwen-captures`. Its reader
+reports `RUNNING`, `COMPLETE`, or `COMPLETE_INVALID_OUTPUT`. Only `COMPLETE`
+with a schema-valid final structured result can enter the bridge parser.
+Success criterion: an end-to-end benign smoke completes through start/poll/read
+without a token in command line, repository, or central metrics.
