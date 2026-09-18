@@ -461,3 +461,26 @@ shell/test side effects и без загрязнения worktree другого
 Наблюдаемый failure: первые реализации gates проверяли часть формы receipt, но не все semantics: закрытая taxonomy channel, нерекурсивная raw-free проверка, неполная state evidence и scenario fixtures без композиции gates.
 
 Решение: re-open Tickets 9, 11, 12 и 13. Channel taxonomy становится extensible и согласованной с observed behavior; semantic contracts содержат input/output states; PASS projection рекурсивно исключает запрещённые поля; scenario fixtures проходят реальные policy gates и не могут вернуть DONE. Критерий успеха: каждый прежний bypass имеет RED/Green fixture.
+
+## D022 — Luna-first routing с доказуемой эскалацией
+
+Статус: принято 2026-09-18.
+
+Наблюдаемый failure: ordinary задачи могли получать standard/frontier tier до
+того, как ограниченный efficient-tier loop дал доказательство своей
+недостаточности. Вместе с повторным чтением context это повышало расход
+лимитов, не улучшая acceptance evidence.
+
+Решение: для ordinary локальной реализации Controller запрашивает
+`efficient/high` и допускает один scoped Luna repair; у mechanical low-risk
+ticket — максимум два repair при новом RED или новой локализации. Переход на
+`standard/high` требует `EFFICIENT_TIER_DEFICIENCY` с model identity, RED,
+fingerprint, scope, причиной и следующим closure. Reviewer остаётся
+independent `standard/medium`; critical/resumed/security/native/concurrency
+ticket не используют дополнительный Luna repair. Числовые budget, full suite,
+acceptance authority и stop gates не ослабляются.
+
+Критерий успеха: pilot из десяти ordinary ticket показывает меньше
+`standard`/`frontier` запусков без роста `REJECTED`, reopen или времени до
+первого подтверждённого GREEN. Critical ticket, включая Ticket 355, не входят
+в сравнение.

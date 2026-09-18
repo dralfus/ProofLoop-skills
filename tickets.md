@@ -194,3 +194,25 @@ candidate diff в своей worktree. Codex independently проверяет ca
 - [x] NOT_AVAILABLE usage сохраняет честную метрику, но не блокирует работу; недоступная critical model не разрешает молчаливый downgrade.
 - [x] Версия protocol синхронизирована между canonical source, plugin, human docs и receipts.
 - [x] Scenario fixtures покрывают следующий defect, infrastructure failure, повтор без нового evidence, resume permit, document-only change и новое security requirement.
+
+## 14. Luna-first routing с доказуемой эскалацией
+
+**Что реализовать:** Обычная локальная задача начинает с `efficient/high`; tier
+повышается только по raw-free evidence недостаточности efficient-tier. Новый
+дешёвый repair не должен превращаться в бесконечный loop или ослаблять
+independent acceptance.
+
+**Blocked by:** None.
+
+**Status:** implemented, local validation complete.
+
+- [x] Canonical lifecycle определяет initial Luna-pass, один repair ordinary и
+  второй только для mechanical low-risk ticket.
+- [x] `EFFICIENT_TIER_DEFICIENCY` фиксирует RED, fingerprint, scope, причину и
+  следующий closure до перехода на `standard/high`.
+- [x] Critical/resumed/security/native/concurrency ticket исключены из
+  дополнительного Luna repair; Reviewer остаётся independent standard tier.
+- [x] Plugin manifest, Qwen extension, validator и человеческие документы
+  синхронизированы с версией 1.14.
+- [x] Review P1 исправлен: ordinary Controller routing выбирает `efficient/medium`
+  и защищён executable profile fixture.

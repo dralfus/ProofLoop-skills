@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 
-REQUIRED_PROTOCOL_VERSION = "1.13"
+REQUIRED_PROTOCOL_VERSION = "1.14"
 REQUIRED_CAPABILITIES = (
     "model_identity",
     "role_dispatch_and_continuation",
@@ -29,7 +29,7 @@ QWEN_FINDING_TYPES = frozenset(
     {"SPEC_VIOLATION", "REGRESSION", "QUALITY_BLOCKER", "NEW_REQUIREMENT", "DESIGN_GAP"}
 )
 CODEX_ROUTE_REQUIREMENTS = {
-    "controller": {"tier": "standard", "effort": "medium"},
+    "controller": {"tier": "efficient", "effort": "medium"},
     "implementer": {"tier": "efficient", "effort": "high"},
     "reviewer": {"tier": "standard", "effort": "medium"},
     "verifier": {"tier": "efficient", "effort": "medium"},
@@ -99,6 +99,8 @@ REQUIRED_CONTRACT_TERMS = (
     "SEMANTIC_DIFF_BLOCKED",
     "references/semantic-diff.md",
     "PASS_PROJECTION_READY",
+    "Luna-first escalation",
+    "EFFICIENT_TIER_DEFICIENCY",
     "PASS_PROJECTION_BLOCKED",
     "references/pass-projection.md",
     "QWEN_ASSIST bridge",
@@ -1297,12 +1299,17 @@ def validate(plugin_root: Path) -> None:
     runtime = plugin_root / "skills/finish-ticket"
     assert (runtime / "SKILL.md").is_file()
     protocol = runtime / "references/task-lifecycle.md"
+    model_escalation = runtime / "references/model-escalation.md"
     assert protocol.is_file()
+    assert model_escalation.is_file()
 
     protocol_text = protocol.read_text(encoding="utf-8")
     assert f"Версия workflow: `{REQUIRED_PROTOCOL_VERSION}`" in protocol_text
     missing = [term for term in REQUIRED_CONTRACT_TERMS if term not in protocol_text]
     assert not missing, f"runtime adapter contract is missing: {missing}"
+    escalation_text = model_escalation.read_text(encoding="utf-8")
+    for term in ("Luna-first", "EFFICIENT_TIER_DEFICIENCY", "TOKEN_USAGE"):
+        assert term in escalation_text, f"model escalation reference is missing: {term}"
 
 
 def main() -> None:

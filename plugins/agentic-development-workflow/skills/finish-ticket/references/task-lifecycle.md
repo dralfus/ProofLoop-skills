@@ -1,6 +1,6 @@
 # Протокол выполнения одного ticket
 
-Версия workflow: `1.13`
+Версия workflow: `1.14`
 
 Это единственный обязательный runtime-протокол skill `finish-ticket`.
 Копии этого файла в проекте не требуются.
@@ -44,7 +44,10 @@ policy` перечисляет доступные каждой роли tool cla
 ### Codex adaptive profile
 
 Для Codex adapter сначала проверяет фактический inventory, затем выбирает
-минимально достаточные tier и effort по risk policy ниже. Для запроса
+минимально достаточные tier и effort по risk policy ниже. Для ordinary
+локальной реализации `efficient` является Luna-first маршрутом, если
+проверенный registry относит выбранную модель к этому tier; конкретное имя
+модели всегда берётся только из inventory. Для запроса
 `frontier` он детерминированно пробует `frontier`, затем `standard`, затем
 `efficient`; для `standard` — `standard`, затем `efficient`; для `efficient`
 только `efficient`. Каждый кандидат обязан поддерживать требуемый effort; при
@@ -276,7 +279,9 @@ Luna, Terra и Sol — лишь примеры значений текущего
 | Работа | Requested tier | Effort |
 |---|---|---:|
 | Механическая реализация 1–2 файлов | efficient | high |
-| Обычная реализация или Controller | standard | medium |
+| Обычная локальная реализация с доказуемым seam | efficient | high |
+| Controller ordinary ticket | efficient | medium |
+| Controller critical/resumed/неоднозначного ticket | standard | medium |
 | Сложная или критичная реализация | standard | high |
 | Обычный Reviewer | standard | medium |
 | Критичный Reviewer | standard | high |
@@ -295,6 +300,29 @@ Frontier `high` не является default для critical ticket. Перед
 на ticket требует явного разрешения пользователя. `xhigh` разрешён только
 после измеримого недостатка `high`; `max` и `ultra` не входят в стандартный
 процесс.
+
+### Luna-first escalation
+
+Полная policy и формы evidence находятся в
+[`references/model-escalation.md`](model-escalation.md). Она применяется только
+к Codex profile и не меняет отдельную Qwen policy.
+
+Для ordinary ticket Controller сначала выбирает `efficient/high` Implementer.
+Переход на `standard/high` разрешён только после `EFFICIENT_TIER_DEFICIENCY`:
+в записи должны быть последний reproducible RED, нормализованный fingerprint,
+состояние scope и одна конкретная причина, почему следующий bounded loop требует
+более глубокого межкомпонентного рассуждения. Статус `IMPLEMENTED`, общий
+boolean теста, нехватка времени или желание повысить качество не являются таким
+доказательством.
+
+У обычной задачи после initial Luna-pass допустим один scoped Luna repair.
+У механической low-risk задачи допустимы два scoped Luna repair; каждый обязан
+закрывать или точнее локализовать finding. Это максимум три Luna-прохода вместе
+с initial pass, а не право на три одинаковые попытки. Повтор fingerprint,
+регрессия, расширение scope, новый state owner, security boundary или design gap
+немедленно включает существующий stop gate и не расходует дополнительный
+Luna-цикл. Эскалация на `standard` не увеличивает числовой budget role-agent,
+full suite или абсолютный лимит пяти fix-раундов.
 
 Перед каждым spawn Controller публикует:
 
@@ -409,10 +437,14 @@ pending job, а `full_suite` — только один на ticket.
 - `DESIGN_GAP` немедленно даёт `BLOCKED_FOR_DESIGN`.
 - Fix 1 выполняет исходный Implementer одним follow-up в уже созданной роли;
   затем запускается один scoped re-review finding и связанных regressions.
+- Для mechanical low-risk ticket допустим также Fix 2 тем же `efficient/high`
+  Implementer, только при новом evidence согласно `model-escalation.md`; затем
+  следует escalation decision, а не автоматический третий repair.
 - Второе появление пары «тип finding + корневая причина» немедленно даёт
   `BLOCKED_FOR_DESIGN`.
-- После первого scoped fix ordinary ticket исчерпывает default budget и
-  требует checkpoint с явным разрешением пользователя. Critical ticket может
+- После разрешённого Luna repair обычный ticket получает `standard/high` только
+  через `EFFICIENT_TIER_DEFICIENCY`; без неё Controller сохраняет checkpoint и
+  возвращает `BUDGET_GATE` либо применимый stop gate. Critical ticket может
   завершить один re-review и Verifier в зарезервированном четвёртом запуске.
 - После двух неуспешных fixes Controller запрашивает явное разрешение
   пользователя. Автоматический третий раунд запрещён.

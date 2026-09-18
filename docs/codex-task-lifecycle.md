@@ -1,6 +1,6 @@
 # Жизненный цикл задач Codex
 
-Версия workflow: `1.12`
+Версия workflow: `1.14`
 
 ## Источник истины
 
@@ -169,6 +169,14 @@ evidence; при stop gate показывается только блокиру�
 только с fake seam не достаточно для изменённой boundary.
 
 Обычный ticket имеет 3 role-agent запуска, critical — 4; максимум 1 full suite.
+Для ordinary локальной реализации Controller начинает с verified
+`efficient/high` (Luna-first, если registry относит выбранный model ID к этому
+tier). После initial pass разрешён один scoped Luna repair; у механической
+low-risk задачи — два, но только при новом RED/evidence. Переход на
+`standard/high` требует записи `EFFICIENT_TIER_DEFICIENCY`: последний RED,
+fingerprint, scope, конкретная причина и следующий red-capable loop. Review
+остаётся independent `standard/medium`; critical/resumed/security/native/
+concurrency ticket не получают дополнительный Luna repair.
 После `Reviewer FAIL` Verifier ещё не запущен: один scoped fix использует
 follow-up Implementer, scoped re-review и затем Verifier в тех же четырёх
 critical launches. Role-agent получает только компактный implementation packet.
@@ -239,4 +247,4 @@ Controller хранит отдельно найденные и реально в
 Verifier принимает итоговую PASS-приёмку только при raw-free projection с candidate identity, execution channel, artifact reference, criterion counts, required controls и evidence status. Projection не содержит prompt, secret, path, raw command output, exception text или customer data. Неполный либо небезопасный receipt означает `PASS_PROJECTION_BLOCKED`; полный — `PASS_PROJECTION_READY`. Схема: [reference PASS projection](../plugins/agentic-development-workflow/skills/finish-ticket/references/pass-projection.md).
 ## Scenario fixtures
 
-Версия workflow `1.13`. Scenario fixtures подтверждают честные terminal states и не допускают ложный `DONE`.
+Версия workflow `1.14`. Scenario fixtures подтверждают честные terminal states и не допускают ложный `DONE`.

@@ -104,7 +104,7 @@ Aggregate acceptance может честно вернуть `REJECTED`, но о�
 in-scope verdict. Новый repair в этой точке стал бы догадкой и мог бы запустить
 дорогой цикл без feedback signal.
 
-Версия `1.12` требует raw-free `FAILURE_PROJECTION` и разрешает ровно один
+Версия `1.14` требует raw-free `FAILURE_PROJECTION` и разрешает ровно один
 test-only diagnostic loop без нового role-agent launch. Если projection не
 получена повторно, ticket блокируется как `DIAGNOSTIC_EVIDENCE_INCOMPLETE`.
 
@@ -117,9 +117,22 @@ protocol: она может расширять scope, запускать лиш�
 worktree, затем малым candidate по отдельному решению Controller; health gate
 останавливает повтор root cause, две непрогрессивные попытки или седьмой вызов.
 
+## Наблюдаемый failure mode 11: преждевременная дорогая эскалация
+
+Даже при здоровых acceptance gates ordinary ticket мог начинаться на standard
+или быстро переходить на более дорогую модель без доказательства, что
+efficient-tier локальный loop исчерпан. Это увеличивает token usage, но не
+даёт нового evidence. Ответ — Luna-first routing для ограниченной реализации,
+а не ослабление review или увеличение бесконечного repair-loop.
+
+Эскалация на standard допускается только после raw-free
+`EFFICIENT_TIER_DEFICIENCY`. Обычный ticket получает initial Luna-pass и один
+scoped repair; mechanical low-risk — не более двух repair при новой
+локализации. Critical ticket не является частью этого дешёвого маршрута.
+
 ## Текущая цель
 
-Проверить глобальный plugin и протокол версии `1.12` на следующем реальном
+Проверить глобальный plugin и протокол версии `1.14` на следующих десяти ordinary
 ticket без копирования workflow-файлов в проект. До первого spawn подтвердить
 runtime capability declaration и `BLOCKED_CAPABILITY` при её отсутствии, затем
 измерить:

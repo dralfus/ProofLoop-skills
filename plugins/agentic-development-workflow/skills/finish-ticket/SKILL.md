@@ -62,6 +62,9 @@ description: Использовать для реализации или воз�
   внешний runner не получает этот канал без технического enforcement.
 - Повтор корневой причины, design gap, превышение scope, бюджета или контекста
   включает stop gate.
+- Для ordinary Codex ticket Implementer начинает с verified `efficient/high`;
+  переход на `standard/high` требует `EFFICIENT_TIER_DEFICIENCY` по
+  `references/model-escalation.md`. Эта policy не заменяет existing stop gates.
 - После closure Controller публикует observed `TOKEN_USAGE`: отдельно
   Implementer/follow-ups и total ticket; недоступные provider counters помечает
   `NOT_AVAILABLE`.

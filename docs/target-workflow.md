@@ -67,6 +67,9 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
 - Раунды 3–5 требуют явного разрешения пользователя.
 - До первого spawn определяются лимиты role-agent запусков, frontier-эскалаций,
   full suite и context compaction.
+- Ordinary локальная реализация начинает с verified `efficient/high`; Luna-first
+  repair допускается только при новом RED/evidence, а переход на `standard/high`
+  требует `EFFICIENT_TIER_DEFICIENCY` и не увеличивает общие лимиты.
 - До Implementer каждый acceptance criterion имеет production entry point,
   test seam, red-capable command и owner; иначе ticket блокируется для design.
 - Изменённая injectable boundary дополнительно имеет production-shaped consumer
@@ -115,7 +118,7 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
 ## Следующий эксперимент
 
 Установить plugin `agentic-development-workflow` и применить workflow версии
-`1.12` к одному реальному ticket без workflow-файлов в проекте. До реализации
+`1.14` к десяти ordinary ticket без workflow-файлов в проекте. До реализации
 зафиксировать runtime capability declaration, risk, ожидаемый file scope и
 stop conditions; при отсутствующей capability подтвердить
 `BLOCKED_CAPABILITY`. После завершения сравнить число запусков, тестов,
