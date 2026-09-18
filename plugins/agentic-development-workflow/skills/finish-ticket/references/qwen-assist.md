@@ -24,8 +24,9 @@ object либо извлекает object из final event `{"type":"result",
 Smoke и recon используют `--bare`, чтобы не загружать неявные workspace
 customizations. `--safe-mode` запрещён. Для `--auth-type openai` обёртка
 читает Generic Credential текущего пользователя с target
-`ProofLoop/Qwen/OpenAI`, передаёт его только как `OPENAI_API_KEY` процессу Qwen
-и в `finally` восстанавливает прежнее значение либо удаляет переменную. Имя
+`ProofLoop/Qwen/OpenAI`, передаёт его только как `OPENAI_API_KEY`, а configured
+base URL/model — как `OPENAI_BASE_URL`/`OPENAI_MODEL` процессу Qwen, и в
+`finally` восстанавливает прежние значения либо удаляет переменные. Имя
 target допустимо передать параметром; credential, token и raw output не входят
 в ticket packet, report или metrics.
 ## QWEN_RECON
@@ -65,3 +66,16 @@ When the host transport cannot reliably retain terminal stdout, Controller uses
 local app-data, never in the repository or central metrics. A recon may enter
 the bridge parser only after `COMPLETE` and schema validation of the final
 terminal result.
+
+## Write-mode candidate gate
+
+Only an independently confirmed `QWEN_RECON` may open a candidate worktree.
+The capture wrapper remains `plan` by default. A Controller may select `yolo`
+only for this isolated candidate, with `--bare`, the existing turn/wall/tool
+limits, no `--safe-mode`, and no Git, network, MCP, subagent or full-suite
+authority in the packet. The candidate must return the machine-readable
+`qwen-assist-patch.schema.json` manifest; it limits the declared result to two
+files, 200 changed lines, one targeted test, no Git operations and no full
+suite. Controller independently checks the actual diff, file count, line count,
+worktree status and targeted test before any transfer. A missing terminal
+manifest is recorded as `QWEN_UNUSABLE` for the write-output contract and does not permit a retry with the same root cause.

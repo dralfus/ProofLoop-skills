@@ -145,8 +145,9 @@ recon.
 Smoke и recon используют `--bare`, но не `--safe-mode`, чтобы не загружать
 неявные workspace customizations. При `--auth-type openai` обёртка получает
 Generic Credential текущего пользователя `ProofLoop/Qwen/OpenAI`, назначает его
-только `OPENAI_API_KEY` дочернего процесса Qwen и в `finally` восстанавливает
-или удаляет process variable. Отсутствующий credential —
+`OPENAI_API_KEY` дочернего процесса Qwen, а configured endpoint/model — как
+`OPENAI_BASE_URL`/`OPENAI_MODEL`; в `finally` восстанавливает или удаляет эти
+process variables. Отсутствующий credential —
 `INFRASTRUCTURE_BLOCKER` до первого turn; token не входит в ticket packet,
 report или metrics.
 Первый Qwen-вызов читает код из clean fixed-point worktree и возвращает только
@@ -271,3 +272,15 @@ bounded worker with `start_qwen_assist_capture.ps1` and polls it with
 `get_qwen_assist_capture.ps1`. stdout/stderr remain under local app-data;
 `RUNNING` and `COMPLETE_INVALID_OUTPUT` are not ticket evidence. Controller
 parses a report only after `COMPLETE` and final schema validation.
+
+### Qwen patch-candidate write gate
+
+`plan` остаётся default capture-wrapper. После independently confirmed recon
+Controller может явно выбрать `yolo` только для отдельной candidate worktree;
+packet сохраняет `--bare`, лимиты и запрет Git, сети/MCP, subagents и full
+suite. Qwen обязан вернуть `qwen-assist-patch.schema.json`: максимум два
+файла, 200 строк, один targeted test, пустой массив Git operations и `false` для full suite. Controller
+не доверяет этому manifest автоматически: он сверяет реальный diff, scope,
+line count, worktree status и сам выполняет targeted test. Отсутствующий
+terminal manifest означает `QWEN_UNUSABLE` именно для write-output contract и
+останавливает повтор с той же root cause.

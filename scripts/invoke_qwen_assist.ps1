@@ -12,11 +12,41 @@ param(
     [ValidateSet('openai', 'openai-responses', 'anthropic', 'qwen-oauth', 'gemini', 'vertex-ai')]
     [string]$AuthType,
 
+    [ValidateSet('plan', 'yolo')]
+    [string]$ApprovalMode = 'plan',
+
+    [switch]$SuccessfulRecon,
+
+    [string]$ReconReportPath,
+
+    [string]$Baseline,
+
     [ValidatePattern('^[A-Za-z0-9._/-]+$')]
+
     [string]$CredentialTarget = 'ProofLoop/Qwen/OpenAI'
 )
 
 $ErrorActionPreference = 'Stop'
+if ($ApprovalMode -eq 'yolo' -and -not $SuccessfulRecon) {
+    throw 'ApprovalMode yolo requires -SuccessfulRecon.'
+}
+if ($ApprovalMode -eq 'yolo') {
+    if ((Split-Path -Leaf $SchemaPath) -ne 'qwen-assist-patch.schema.json') {
+        throw 'ApprovalMode yolo requires qwen-assist-patch.schema.json.'
+    }
+    if ($Worktree -notmatch '^qwen-patch-') {
+        throw 'ApprovalMode yolo requires a qwen-patch- worktree.'
+    }
+    if (-not $ReconReportPath -or -not (Test-Path -LiteralPath $ReconReportPath)) {
+        throw 'ApprovalMode yolo requires an existing -ReconReportPath.'
+    }
+    if (-not $Baseline -or $Baseline -ne ((& git rev-parse HEAD).Trim())) {
+        throw 'ApprovalMode yolo requires -Baseline matching current HEAD.'
+    }
+}
+    $reconValidation = python "$PSScriptRoot\qwen_assist.py" --validate-recon (Get-Content -Raw -LiteralPath $ReconReportPath) | ConvertFrom-Json
+    if ($reconValidation.status -ne 'EVIDENCE_FOUND') { throw 'ApprovalMode yolo requires schema-valid recon evidence.' }
+
 $requiredMarkers = @(
     '--prompt', '--output-format', '--json-schema', '--worktree',
     '--approval-mode', '--max-session-turns', '--max-wall-time',
@@ -42,6 +72,7 @@ $authArgs = @()
 if ($AuthType) {
     $authArgs = @('--auth-type', $AuthType)
 }
+$excludedTools = if ($ApprovalMode -eq 'plan') { 'Agent,edit,notebook_edit,run_shell_command' } else { 'Agent,run_shell_command' }
 
 . "$PSScriptRoot\qwen_credential.ps1"
 $previousApiKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY', 'Process')
@@ -59,7 +90,7 @@ try {
     $env:OPENAI_MODEL = $openAiModel
 
     & qwen @authArgs `
-        '--approval-mode' 'plan' `
+        '--approval-mode' $ApprovalMode `
         '--output-format' 'json' `
         '--json-schema' "@$SchemaPath" `
         '--worktree' $Worktree `
@@ -68,7 +99,7 @@ try {
         '--max-wall-time' '10m' `
         '--max-tool-calls' '20' `
         '--max-subagent-depth' '1' `
-        '--exclude-tools' 'Agent' `
+        '--exclude-tools' $excludedTools `
         '--disabled-slash-commands' 'review,loop' `
         '--prompt' $Prompt
     $exitCode = $LASTEXITCODE

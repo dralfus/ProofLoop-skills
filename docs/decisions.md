@@ -549,3 +549,27 @@ reports `RUNNING`, `COMPLETE`, or `COMPLETE_INVALID_OUTPUT`. Only `COMPLETE`
 with a schema-valid final structured result can enter the bridge parser.
 Success criterion: an end-to-end benign smoke completes through start/poll/read
 without a token in command line, repository, or central metrics.
+
+## D026 — Явно отделить write-candidate Qwen от read-only recon
+
+Статус: принято 2026-09-18.
+
+Наблюдаемый failure: read-only `plan` packet показывает модели edit и shell
+tools, хотя policy их отклоняет; для patch candidate отдельный write-mode
+нуждается в явном, а не неявном, переходе. Live Ticket 314 также показал, что
+Qwen может завершить маленький diff, но исчерпать 12 turns до terminal
+`structured_output`; отсутствие manifest не даёт права считать output contract
+успешным или повторять тот же packet.
+
+Решение: capture-wrapper получает explicit `ApprovalMode` со значением `plan`
+по умолчанию и `yolo` только для already-confirmed recon в isolated worktree.
+Read-only invocation явно исключает `Agent`, `edit`, `notebook_edit` и
+`run_shell_command`. Write candidate обязан следовать
+`qwen-assist-patch.schema.json` (2 files, 200 lines, one targeted test, no Git
+or full suite), но Controller independently сверяет настоящий diff и выполняет
+test перед переносом. Повторный отсутствующий terminal manifest останавливает
+write-output branch как `QWEN_UNUSABLE`.
+
+Критерий успеха: focused tests подтверждают distinct plan/yolo tool lists,
+`-SuccessfulRecon` обязателен для `yolo`, schema и validator принимают только
+пустой список Git operations; candidate pilot либо возвращает schema-valid

@@ -77,7 +77,7 @@ def build_recon_command(
         "--max-subagent-depth",
         "1",
         "--exclude-tools",
-        "Agent",
+        "Agent,edit,notebook_edit,run_shell_command",
         "--disabled-slash-commands",
         "review,loop",
         "--prompt",
@@ -221,7 +221,7 @@ def validate_patch_candidate(candidate: object) -> dict[str, object]:
     tests = candidate.get("targeted_tests")
     if not isinstance(tests, list) or len(tests) != 1 or not _non_empty_string(tests[0]):
         return {"status": "QWEN_UNUSABLE", "reason": "TARGETED_TEST_REQUIRED"}
-    if candidate.get("git_operations") or candidate.get("full_suite") is not False:
+    if candidate.get("git_operations") != [] or candidate.get("full_suite") is not False:
         return {"status": "QWEN_UNUSABLE", "reason": "GIT_INTEGRATION_FORBIDDEN"}
     return {"status": "CANDIDATE_PATCH"}
 

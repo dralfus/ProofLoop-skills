@@ -73,6 +73,10 @@ class QwenAssistTest(unittest.TestCase):
         self.assertIn("'--bare'", required_markers)
         self.assertIn("    '--bare' `", wrapper)
 
+        self.assertIn("$excludedTools = if ($ApprovalMode -eq 'plan')", wrapper)
+        self.assertIn("'Agent,edit,notebook_edit,run_shell_command'", wrapper)
+        self.assertIn("else { 'Agent,run_shell_command' }", wrapper)
+
         self.assertIn("[string]$AuthType", wrapper)
         self.assertIn("'--auth-type'", wrapper)
         self.assertIn("[string]$CredentialTarget", wrapper)
@@ -102,6 +106,11 @@ class QwenAssistTest(unittest.TestCase):
         self.assertIn("--exclude-tools", command)
         self.assertIn("--bare", command)
         self.assertNotIn("--fallback-model", command)
+        excluded_tool_index = command.index("--exclude-tools")
+        self.assertEqual(
+            command[excluded_tool_index + 1],
+            "Agent,edit,notebook_edit,run_shell_command",
+        )
 
         invalid = QWEN_ASSIST.run_recon(
             help_text=QWEN_HELP,
@@ -245,6 +254,12 @@ class QwenAssistTest(unittest.TestCase):
             QWEN_ASSIST.validate_patch_candidate(candidate),
             {"status": "QWEN_UNUSABLE", "reason": "GIT_INTEGRATION_FORBIDDEN"},
         )
+        candidate["git_operations"] = False
+        self.assertEqual(
+            QWEN_ASSIST.validate_patch_candidate(candidate),
+            {"status": "QWEN_UNUSABLE", "reason": "GIT_INTEGRATION_FORBIDDEN"},
+        )
+
 
     def test_metrics_store_only_anonymized_fields(self) -> None:
         metric = QWEN_ASSIST.anonymize_metric(
