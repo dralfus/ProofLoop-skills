@@ -74,6 +74,16 @@ The repeated root cause is `QWEN_UNUSABLE`, not Ticket 314 acceptance evidence.
 - [ ] Нет diff ticket 355, записей Qwen или тестовых side effects.
 
 ## 5. `QWEN_PATCH_CANDIDATE` с независимым переносом
+**Update (2026-09-18, supersedes status above):** Ticket 4 is done. A narrowed
+one-file packet returned schema-valid `EVIDENCE_FOUND` in three turns from a
+clean isolated worktree at baseline `c7ad67ce9bcfa21526d56b9a7eca5f3b82ca673a`.
+Codex independently confirmed three locatable facts, empty `writes` and no
+worktree diff; the local metric contains only approved aggregate fields. This
+is bridge evidence, not Ticket 314 acceptance evidence.
+
+**Update for Ticket 5:** partial. Qwen produced an independently verified
+2-file/8-line candidate, but both write runs ended exit `53` without terminal
+patch manifest; the write-output branch remains `QWEN_UNUSABLE` and stops same-root retries.
 
 **Что реализовать:** После подтверждённого recon Qwen может создать небольшой
 candidate diff в своей worktree. Codex independently проверяет candidate и сам

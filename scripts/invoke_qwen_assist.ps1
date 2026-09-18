@@ -43,9 +43,9 @@ if ($ApprovalMode -eq 'yolo') {
     if (-not $Baseline -or $Baseline -ne ((& git rev-parse HEAD).Trim())) {
         throw 'ApprovalMode yolo requires -Baseline matching current HEAD.'
     }
-}
     $reconValidation = python "$PSScriptRoot\qwen_assist.py" --validate-recon (Get-Content -Raw -LiteralPath $ReconReportPath) | ConvertFrom-Json
     if ($reconValidation.status -ne 'EVIDENCE_FOUND') { throw 'ApprovalMode yolo requires schema-valid recon evidence.' }
+}
 
 $requiredMarkers = @(
     '--prompt', '--output-format', '--json-schema', '--worktree',
