@@ -92,3 +92,12 @@ agent; canonical lifecycle остаётся только в `references/task-lif
 Короткий Qwen запуск: `/finish-ticket ticket <ID или путь>`. До role dispatch
 Controller применяет exact Qwen capability preflight, затем
 `QWEN_CONVERGENT`, а не Codex numeric repair cap.
+
+## QWEN_PATCH_SEAL
+
+После unsealed candidate с exact turn-limit missing-manifest Controller может
+выполнить ровно один read-only `plan` seal по `references/qwen-assist.md`.
+`PATCH_SEAL_RECEIPT` и exact Qwen manifest дают только `SEALED_CANDIDATE`;
+transfer, acceptance или retry при mismatch запрещены.
+
+Runtime enforcement atomically reserves the ticket's sole seal call, includes PATCH_SEAL_RECEIPT in Qwen's packet, and emits SEALED_CANDIDATE only after capture-reader exact terminal-manifest comparison.

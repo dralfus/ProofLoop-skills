@@ -613,3 +613,17 @@ PASS evidence публикуется по [`references/pass-projection.md`](pass
 Scenario fixtures проверяются через `--scenario-fixture`; они покрывают next defect, infrastructure failure, repeated evidence, resume mismatch, document-only change и new security requirement без ложного `DONE`.
 
 Scenario fixture обязан композиционно вызвать соответствующий gate; отображение имени события в terminal status недостаточно.
+
+## QWEN_PATCH_SEAL
+
+When a bounded `yolo` candidate has the exact terminal reason
+`STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`, Controller may run one
+`QWEN_PATCH_SEAL` call before review. Controller first creates a raw-free
+`PATCH_SEAL_RECEIPT` from the observed baseline, bounded diff, one green
+targeted test, empty Git operations and `full_suite: false`. Seal uses Qwen
+`plan`, never yolo; it excludes edit, shell, Git, network/MCP and subagents.
+Qwen must emit the existing patch schema. Only an exact match between that
+Qwen manifest and the receipt becomes `SEALED_CANDIDATE`. A missing or mismatched
+manifest is terminal `QWEN_UNUSABLE`: no retry and no transfer. Seal consumes
+one ticket Qwen call and grants neither acceptance nor transfer authority.
+Runtime atomically reserves that sole ticket call, supplies the raw-free receipt to Qwen, and emits `SEALED_CANDIDATE` only after the capture reader exactly compares its terminal manifest.

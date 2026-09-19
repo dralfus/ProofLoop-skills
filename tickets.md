@@ -240,3 +240,19 @@ independent acceptance.
   синхронизированы с версией 1.14.
 - [x] Review P1 исправлен: ordinary Controller routing выбирает `efficient/medium`
   и защищён executable profile fixture.
+
+## Update: Ticket 5 QWEN_PATCH_SEAL
+
+D027 добавляет одноразовый read-only `plan` seal после наблюдаемого unsealed
+`yolo` diff с `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`. Только exact manifest
+Qwen, совпадающий с `PATCH_SEAL_RECEIPT`, создаёт `SEALED_CANDIDATE`; нет
+retry, transfer или acceptance без независимого review.
+
+## Update: Ticket 5 runtime seal evidence (2026-09-19)
+
+The isolated `QWEN_PATCH_SEAL` smoke reached a schema-valid receipt after a
+bounded unsealed yolo diff and green targeted test, but its one read-only
+`plan` seal call ended at turn limit without a terminal manifest. No
+`SEALED_CANDIDATE` or transfer was created; this is terminal `QWEN_UNUSABLE`
+for the seal output contract. See
+`docs/experiments/qwen-assist-patch-seal-smoke-2026-09-19.md`.

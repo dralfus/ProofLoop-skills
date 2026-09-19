@@ -284,3 +284,15 @@ suite. Qwen обязан вернуть `qwen-assist-patch.schema.json`: мак�
 line count, worktree status и сам выполняет targeted test. Отсутствующий
 terminal manifest означает `QWEN_UNUSABLE` именно для write-output contract и
 останавливает повтор с той же root cause.
+
+## QWEN_PATCH_SEAL
+
+`QWEN_PATCH_SEAL` is a one-call read-only `plan` stage after the exact yolo
+reason `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`. Controller supplies a
+raw-free `PATCH_SEAL_RECEIPT` with independently observed bounded scope and one
+green targeted test; it does not synthesize the manifest. Only Qwen's exact
+patch-schema result becomes `SEALED_CANDIDATE`. Missing or mismatched output is
+terminal `QWEN_UNUSABLE`, with no retry and no transfer. Seal gives Qwen no
+acceptance, Git, full-suite, network/MCP, shell or subagent authority.
+
+Runtime enforcement atomically reserves the ticket's sole seal call, includes PATCH_SEAL_RECEIPT in Qwen's packet, and emits SEALED_CANDIDATE only after capture-reader exact terminal-manifest comparison.

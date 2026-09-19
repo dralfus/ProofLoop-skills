@@ -216,7 +216,12 @@ def validate_patch_candidate(candidate: object) -> dict[str, object]:
         _non_empty_string(path) for path in files
     ):
         return {"status": "QWEN_UNUSABLE", "reason": "PATCH_SCOPE_EXCEEDED"}
-    if not isinstance(candidate.get("changed_lines"), int) or candidate["changed_lines"] < 1 or candidate["changed_lines"] > 200:
+    if (
+        not isinstance(candidate.get("changed_lines"), int)
+        or isinstance(candidate["changed_lines"], bool)
+        or candidate["changed_lines"] < 1
+        or candidate["changed_lines"] > 200
+    ):
         return {"status": "QWEN_UNUSABLE", "reason": "PATCH_SCOPE_EXCEEDED"}
     tests = candidate.get("targeted_tests")
     if not isinstance(tests, list) or len(tests) != 1 or not _non_empty_string(tests[0]):
@@ -224,6 +229,73 @@ def validate_patch_candidate(candidate: object) -> dict[str, object]:
     if candidate.get("git_operations") != [] or candidate.get("full_suite") is not False:
         return {"status": "QWEN_UNUSABLE", "reason": "GIT_INTEGRATION_FORBIDDEN"}
     return {"status": "CANDIDATE_PATCH"}
+
+
+def validate_patch_seal_receipt(
+    receipt: object, expected_baseline: str | None = None
+) -> dict[str, object]:
+    """Accept only an independently observed, bounded unsealed candidate."""
+    required_fields = {
+        "baseline", "files", "changed_lines", "targeted_tests", "targeted_exit_code",
+        "git_operations", "full_suite", "yolo_reason",
+    }
+    if not isinstance(receipt, dict) or set(receipt) != required_fields:
+        return {"status": "QWEN_UNUSABLE", "reason": "MALFORMED_PATCH_SEAL_RECEIPT"}
+    if not _non_empty_string(receipt.get("baseline")):
+        return {"status": "QWEN_UNUSABLE", "reason": "MALFORMED_PATCH_SEAL_RECEIPT"}
+    if expected_baseline is not None and receipt["baseline"] != expected_baseline:
+        return {"status": "QWEN_UNUSABLE", "reason": "PATCH_SEAL_BASELINE_MISMATCH"}
+    targeted_exit_code = receipt.get("targeted_exit_code")
+    if not isinstance(targeted_exit_code, int) or isinstance(targeted_exit_code, bool):
+        return {"status": "QWEN_UNUSABLE", "reason": "MALFORMED_PATCH_SEAL_RECEIPT"}
+    if targeted_exit_code != 0:
+        return {"status": "QWEN_UNUSABLE", "reason": "TARGETED_TEST_NOT_GREEN"}
+    if receipt.get("yolo_reason") != "STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT":
+        return {"status": "QWEN_UNUSABLE", "reason": "PATCH_SEAL_NOT_ELIGIBLE"}
+    candidate = {
+        "successful_recon": True,
+        "files": receipt["files"],
+        "changed_lines": receipt["changed_lines"],
+        "targeted_tests": receipt["targeted_tests"],
+        "git_operations": receipt["git_operations"],
+        "full_suite": receipt["full_suite"],
+    }
+    candidate_validation = validate_patch_candidate(candidate)
+    if candidate_validation["status"] != "CANDIDATE_PATCH":
+        return candidate_validation
+    return {"status": "PATCH_SEAL_RECEIPT_READY"}
+
+
+def reserve_patch_seal(ticket_id: object, receipt: object, seal_store: Path) -> dict[str, object]:
+    """Atomically reserve the single permitted seal call for one ticket."""
+    if not _non_empty_string(ticket_id) or not re.fullmatch(r"[A-Za-z0-9._-]+", ticket_id):
+        return {"status": "QWEN_UNUSABLE", "reason": "MALFORMED_TICKET_ID"}
+    receipt_validation = validate_patch_seal_receipt(receipt)
+    if receipt_validation["status"] != "PATCH_SEAL_RECEIPT_READY":
+        return receipt_validation
+    seal_store.mkdir(parents=True, exist_ok=True)
+    reservation = seal_store / f"{ticket_id}.patch-seal-used"
+    try:
+        with reservation.open("x", encoding="utf-8") as marker:
+            marker.write("reserved\n")
+    except FileExistsError:
+        return {"status": "QWEN_UNUSABLE", "reason": "PATCH_SEAL_ALREADY_USED"}
+    return {"status": "PATCH_SEAL_RESERVED"}
+
+def validate_patch_seal_manifest(receipt: object, manifest: object) -> dict[str, object]:
+    """Seal only a Qwen manifest that exactly matches observed candidate facts."""
+    receipt_validation = validate_patch_seal_receipt(receipt)
+    if receipt_validation["status"] != "PATCH_SEAL_RECEIPT_READY":
+        return receipt_validation
+    manifest_validation = validate_patch_candidate(manifest)
+    if manifest_validation["status"] != "CANDIDATE_PATCH":
+        return manifest_validation
+    assert isinstance(receipt, dict)
+    assert isinstance(manifest, dict)
+    observed_fields = ("files", "changed_lines", "targeted_tests", "git_operations", "full_suite")
+    if any(manifest[field] != receipt[field] for field in observed_fields):
+        return {"status": "QWEN_UNUSABLE", "reason": "PATCH_SEAL_MANIFEST_MISMATCH"}
+    return {"status": "SEALED_CANDIDATE"}
 
 
 def anonymize_metric(metric: object) -> dict[str, object]:
@@ -256,6 +328,13 @@ def main() -> None:
     parser.add_argument("--ledger", type=json.loads)
     parser.add_argument("--candidate", type=json.loads)
     parser.add_argument("--validate-patch", type=json.loads)
+    parser.add_argument("--validate-patch-seal-receipt", type=json.loads)
+    parser.add_argument("--validate-patch-seal-manifest", type=json.loads)
+    parser.add_argument("--patch-seal-receipt", type=json.loads)
+    parser.add_argument("--expected-baseline")
+    parser.add_argument("--reserve-patch-seal", action="store_true")
+    parser.add_argument("--ticket-id")
+    parser.add_argument("--seal-store", type=Path)
     parser.add_argument("--append-metric", type=json.loads)
     parser.add_argument("--metrics-path", type=Path)
     parser.add_argument("--build-recon-command", action="store_true")
@@ -285,6 +364,14 @@ def main() -> None:
         print(json.dumps(next_qwen_attempt(args.ledger, args.candidate), sort_keys=True))
     elif args.validate_patch is not None:
         print(json.dumps(validate_patch_candidate(args.validate_patch), sort_keys=True))
+    elif args.reserve_patch_seal:
+        if args.patch_seal_receipt is None or args.ticket_id is None or args.seal_store is None:
+            parser.error("--reserve-patch-seal requires --patch-seal-receipt, --ticket-id and --seal-store")
+        print(json.dumps(reserve_patch_seal(args.ticket_id, args.patch_seal_receipt, args.seal_store), sort_keys=True))
+    elif args.validate_patch_seal_manifest is not None and args.patch_seal_receipt is not None:
+        print(json.dumps(validate_patch_seal_manifest(args.patch_seal_receipt, args.validate_patch_seal_manifest), sort_keys=True))
+    elif args.validate_patch_seal_receipt is not None:
+        print(json.dumps(validate_patch_seal_receipt(args.validate_patch_seal_receipt, args.expected_baseline), sort_keys=True))
     elif args.append_metric is not None and args.metrics_path is not None:
         metric = anonymize_metric(args.append_metric)
         append_metric(args.metrics_path, metric)
