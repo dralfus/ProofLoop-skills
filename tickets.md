@@ -240,3 +240,10 @@ independent acceptance.
   синхронизированы с версией 1.14.
 - [x] Review P1 исправлен: ordinary Controller routing выбирает `efficient/medium`
   и защищён executable profile fixture.
+
+## Update: Ticket 5 QWEN_PATCH_SEAL
+
+D027 добавляет одноразовый read-only `plan` seal после наблюдаемого unsealed
+`yolo` diff с `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`. Только exact manifest
+Qwen, совпадающий с `PATCH_SEAL_RECEIPT`, создаёт `SEALED_CANDIDATE`; нет
+retry, transfer или acceptance без независимого review.

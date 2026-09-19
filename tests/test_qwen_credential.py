@@ -10,6 +10,9 @@ HELPER = REPOSITORY_ROOT / "scripts" / "qwen_credential.ps1"
 CAPTURE_RUNNER = REPOSITORY_ROOT / "scripts" / "start_qwen_assist_capture.ps1"
 CAPTURE_READER = REPOSITORY_ROOT / "scripts" / "get_qwen_assist_capture.ps1"
 PATCH_SCHEMA = REPOSITORY_ROOT / "plugins" / "agentic-development-workflow" / "skills" / "finish-ticket" / "references" / "qwen-assist-patch.schema.json"
+CANONICAL_LIFECYCLE = REPOSITORY_ROOT / "plugins" / "agentic-development-workflow" / "skills" / "finish-ticket" / "references" / "task-lifecycle.md"
+QWEN_REFERENCE = REPOSITORY_ROOT / "plugins" / "agentic-development-workflow" / "skills" / "finish-ticket" / "references" / "qwen-assist.md"
+HUMAN_LIFECYCLE = REPOSITORY_ROOT / "docs" / "codex-task-lifecycle.md"
 
 
 class QwenCredentialTest(unittest.TestCase):
@@ -86,6 +89,20 @@ class QwenCredentialTest(unittest.TestCase):
         self.assertEqual(schema["properties"]["targeted_tests"]["maxItems"], 1)
         self.assertEqual(schema["properties"]["git_operations"]["type"], "array")
         self.assertEqual(schema["properties"]["git_operations"]["maxItems"], 0)
+
+    def test_patch_seal_documentation_contract(self) -> None:
+        for document in (CANONICAL_LIFECYCLE, QWEN_REFERENCE, HUMAN_LIFECYCLE):
+            self.assertTrue(document.is_file())
+            content = document.read_text(encoding="utf-8")
+            self.assertIn("QWEN_PATCH_SEAL", content)
+            self.assertIn("PATCH_SEAL_RECEIPT", content)
+            self.assertIn("SEALED_CANDIDATE", content)
+            self.assertIn("plan", content)
+
+        canonical = CANONICAL_LIFECYCLE.read_text(encoding="utf-8")
+        self.assertIn("one", canonical.lower())
+        self.assertIn("no transfer", canonical.lower())
+        self.assertIn("no retry", canonical.lower())
 
 if __name__ == "__main__":
     unittest.main()

@@ -79,3 +79,13 @@ files, 200 changed lines, one targeted test, no Git operations and no full
 suite. Controller independently checks the actual diff, file count, line count,
 worktree status and targeted test before any transfer. A missing terminal
 manifest is recorded as `QWEN_UNUSABLE` for the write-output contract and does not permit a retry with the same root cause.
+
+## QWEN_PATCH_SEAL
+
+`QWEN_PATCH_SEAL` is a one-call read-only `plan` stage after the exact yolo
+reason `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`. Controller supplies a
+raw-free `PATCH_SEAL_RECEIPT` with independently observed bounded scope and one
+green targeted test; it does not synthesize the manifest. Only Qwen's exact
+patch-schema result becomes `SEALED_CANDIDATE`. Missing or mismatched output is
+terminal `QWEN_UNUSABLE`, with no retry and no transfer. Seal gives Qwen no
+acceptance, Git, full-suite, network/MCP, shell or subagent authority.

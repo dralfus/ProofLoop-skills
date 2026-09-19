@@ -573,3 +573,21 @@ write-output branch как `QWEN_UNUSABLE`.
 Критерий успеха: focused tests подтверждают distinct plan/yolo tool lists,
 `-SuccessfulRecon` обязателен для `yolo`, schema и validator принимают только
 пустой список Git operations; candidate pilot либо возвращает schema-valid
+
+## D027 — Seal Qwen manifest after an unsealed bounded candidate
+
+Статус: принято 2026-09-19.
+
+Наблюдаемый failure: `yolo` может внести ограниченный diff, но завершиться на
+turn limit без `structured_output`; повтор того же write packet запрещён health
+gate. Увеличение лимита не делает terminal manifest детерминированным.
+
+Решение: после exact `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT` Controller может
+один раз создать raw-free `PATCH_SEAL_RECEIPT` из observed scope и green
+targeted test и вызвать Qwen в read-only `plan` как `QWEN_PATCH_SEAL`. Только
+точно совпадающий Qwen manifest даёт `SEALED_CANDIDATE`; mismatch/absence —
+terminal `QWEN_UNUSABLE`, no retry and no transfer. Seal расходует один вызов
+общего лимита семь и не получает acceptance authority.
+
+Критерий: isolated smoke проходит `yolo` unsealed diff -> receipt -> Qwen
+plan-seal manifest, после чего candidate всё ещё требует independent review.
