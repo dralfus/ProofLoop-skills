@@ -303,6 +303,7 @@ def main() -> None:
     parser.add_argument("--ledger", type=json.loads)
     parser.add_argument("--candidate", type=json.loads)
     parser.add_argument("--validate-patch", type=json.loads)
+    parser.add_argument("--validate-patch-seal-receipt", type=json.loads)
     parser.add_argument("--append-metric", type=json.loads)
     parser.add_argument("--metrics-path", type=Path)
     parser.add_argument("--build-recon-command", action="store_true")
@@ -332,6 +333,8 @@ def main() -> None:
         print(json.dumps(next_qwen_attempt(args.ledger, args.candidate), sort_keys=True))
     elif args.validate_patch is not None:
         print(json.dumps(validate_patch_candidate(args.validate_patch), sort_keys=True))
+    elif args.validate_patch_seal_receipt is not None:
+        print(json.dumps(validate_patch_seal_receipt(args.validate_patch_seal_receipt), sort_keys=True))
     elif args.append_metric is not None and args.metrics_path is not None:
         metric = anonymize_metric(args.append_metric)
         append_metric(args.metrics_path, metric)

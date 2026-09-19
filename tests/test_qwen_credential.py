@@ -37,11 +37,18 @@ class QwenCredentialTest(unittest.TestCase):
     def test_capture_runner_forwards_explicit_approval_mode(self) -> None:
         runner = CAPTURE_RUNNER.read_text(encoding="utf-8")
 
-        self.assertIn("ValidateSet('plan', 'yolo')", runner)
+        self.assertIn("ValidateSet('plan', 'yolo', 'seal')", runner)
         self.assertIn("[string]$ApprovalMode = 'plan'", runner)
         self.assertIn("-ApprovalMode '$ApprovalMode'", runner)
         self.assertIn("[switch]$SuccessfulRecon", runner)
-        self.assertIn("requires -SuccessfulRecon", runner)
+        self.assertIn("Candidate modes require -SuccessfulRecon", runner)
+
+    def test_capture_runner_forwards_patch_seal_receipt(self) -> None:
+        runner = CAPTURE_RUNNER.read_text(encoding="utf-8")
+
+        self.assertIn("ValidateSet('plan', 'yolo', 'seal')", runner)
+        self.assertIn("[string]$PatchSealReceiptPath", runner)
+        self.assertIn("-PatchSealReceiptPath '$PatchSealReceiptPath'", runner)
 
     def test_capture_reader_reports_running_or_terminal_file_output(self) -> None:
         self.assertTrue(CAPTURE_READER.is_file())

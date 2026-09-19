@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -73,9 +75,11 @@ class QwenAssistTest(unittest.TestCase):
         self.assertIn("'--bare'", required_markers)
         self.assertIn("    '--bare' `", wrapper)
 
-        self.assertIn("$excludedTools = if ($ApprovalMode -eq 'plan')", wrapper)
+        self.assertIn("$effectiveApprovalMode = if ($ApprovalMode -eq 'seal') { 'plan' } else { $ApprovalMode }", wrapper)
+        self.assertIn("$excludedTools = if ($effectiveApprovalMode -eq 'plan')", wrapper)
         self.assertIn("'Agent,edit,notebook_edit,run_shell_command'", wrapper)
         self.assertIn("else { 'Agent,run_shell_command' }", wrapper)
+
 
         self.assertIn("[string]$AuthType", wrapper)
         self.assertIn("'--auth-type'", wrapper)
@@ -88,6 +92,16 @@ class QwenAssistTest(unittest.TestCase):
         self.assertIn("qwen38-flash-next", wrapper)
         self.assertIn("Remove-Item Env:OPENAI_BASE_URL", wrapper)
         self.assertIn("Remove-Item Env:OPENAI_MODEL", wrapper)
+
+    def test_powershell_wrapper_seal_is_read_only(self) -> None:
+        wrapper = POWERSHELL_WRAPPER.read_text(encoding="utf-8")
+
+        self.assertIn("ValidateSet('plan', 'yolo', 'seal')", wrapper)
+        self.assertIn("[string]$PatchSealReceiptPath", wrapper)
+        self.assertIn("$effectiveApprovalMode = if ($ApprovalMode -eq 'seal') { 'plan' } else { $ApprovalMode }", wrapper)
+        self.assertIn("--validate-patch-seal-receipt", wrapper)
+        self.assertIn("'Agent,edit,notebook_edit,run_shell_command'", wrapper)
+
     def test_recon_runner_builds_read_only_bounded_command_and_rejects_bad_output(self) -> None:
         runner = Mock(return_value=(0, json.dumps(self.recon_report()), ""))
         result = QWEN_ASSIST.run_recon(
@@ -324,6 +338,17 @@ class QwenAssistTest(unittest.TestCase):
                 QWEN_ASSIST.validate_patch_seal_manifest(receipt, changed_manifest),
                 {"status": "QWEN_UNUSABLE", "reason": "PATCH_SEAL_MANIFEST_MISMATCH"},
             )
+
+    def test_cli_validates_patch_seal_receipt(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, str(MODULE_PATH), "--validate-patch-seal-receipt", json.dumps(self.patch_seal_receipt())],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(json.loads(completed.stdout), {"status": "PATCH_SEAL_RECEIPT_READY"})
 
     def test_patch_candidate_enforces_small_diff_and_no_git_integration(self) -> None:
         candidate = {

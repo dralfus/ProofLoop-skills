@@ -12,12 +12,14 @@ param(
     [ValidateSet('openai', 'openai-responses', 'anthropic', 'qwen-oauth', 'gemini', 'vertex-ai')]
     [string]$AuthType,
 
-    [ValidateSet('plan', 'yolo')]
+    [ValidateSet('plan', 'yolo', 'seal')]
     [string]$ApprovalMode = 'plan',
 
     [switch]$SuccessfulRecon,
 
     [string]$ReconReportPath,
+
+    [string]$PatchSealReceiptPath,
 
     [string]$Baseline,
 
@@ -47,6 +49,19 @@ if ($ApprovalMode -eq 'yolo') {
     if ($reconValidation.status -ne 'EVIDENCE_FOUND') { throw 'ApprovalMode yolo requires schema-valid recon evidence.' }
 }
 
+if ($ApprovalMode -eq 'seal') {
+    if (-not $SuccessfulRecon) { throw 'ApprovalMode seal requires -SuccessfulRecon.' }
+    if ((Split-Path -Leaf $SchemaPath) -ne 'qwen-assist-patch.schema.json') { throw 'ApprovalMode seal requires qwen-assist-patch.schema.json.' }
+    if ($Worktree -notmatch '^qwen-patch-') { throw 'ApprovalMode seal requires a qwen-patch- worktree.' }
+    if (-not $ReconReportPath -or -not (Test-Path -LiteralPath $ReconReportPath)) { throw 'ApprovalMode seal requires an existing -ReconReportPath.' }
+    if (-not $Baseline -or $Baseline -ne ((& git rev-parse HEAD).Trim())) { throw 'ApprovalMode seal requires -Baseline matching current HEAD.' }
+    $reconValidation = python "$PSScriptRoot\qwen_assist.py" --validate-recon (Get-Content -Raw -LiteralPath $ReconReportPath) | ConvertFrom-Json
+    if ($reconValidation.status -ne 'EVIDENCE_FOUND') { throw 'ApprovalMode seal requires schema-valid recon evidence.' }
+    if (-not $PatchSealReceiptPath -or -not (Test-Path -LiteralPath $PatchSealReceiptPath)) { throw 'ApprovalMode seal requires an existing -PatchSealReceiptPath.' }
+    $sealValidation = python "$PSScriptRoot\qwen_assist.py" --validate-patch-seal-receipt (Get-Content -Raw -LiteralPath $PatchSealReceiptPath) | ConvertFrom-Json
+    if ($sealValidation.status -ne 'PATCH_SEAL_RECEIPT_READY') { throw 'ApprovalMode seal requires a schema-valid observed receipt.' }
+}
+
 $requiredMarkers = @(
     '--prompt', '--output-format', '--json-schema', '--worktree',
     '--approval-mode', '--max-session-turns', '--max-wall-time',
@@ -72,7 +87,8 @@ $authArgs = @()
 if ($AuthType) {
     $authArgs = @('--auth-type', $AuthType)
 }
-$excludedTools = if ($ApprovalMode -eq 'plan') { 'Agent,edit,notebook_edit,run_shell_command' } else { 'Agent,run_shell_command' }
+$effectiveApprovalMode = if ($ApprovalMode -eq 'seal') { 'plan' } else { $ApprovalMode }
+$excludedTools = if ($effectiveApprovalMode -eq 'plan') { 'Agent,edit,notebook_edit,run_shell_command' } else { 'Agent,run_shell_command' }
 
 . "$PSScriptRoot\qwen_credential.ps1"
 $previousApiKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY', 'Process')
@@ -90,7 +106,7 @@ try {
     $env:OPENAI_MODEL = $openAiModel
 
     & qwen @authArgs `
-        '--approval-mode' $ApprovalMode `
+        '--approval-mode' $effectiveApprovalMode `
         '--output-format' 'json' `
         '--json-schema' "@$SchemaPath" `
         '--worktree' $Worktree `
