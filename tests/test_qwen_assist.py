@@ -238,6 +238,93 @@ class QwenAssistTest(unittest.TestCase):
             {"status": "QWEN_UNUSABLE", "reason": "RETRY_WITHOUT_CHANGED_PACKET"},
         )
 
+    def patch_seal_receipt(self) -> dict[str, object]:
+        return {
+            "baseline": "abc123",
+            "files": ["scripts/qwen_assist.py"],
+            "changed_lines": 12,
+            "targeted_tests": [
+                "python -m unittest tests.test_qwen_assist.QwenAssistTest.test_patch_seal_accepts_exact_observed_manifest"
+            ],
+            "targeted_exit_code": 0,
+            "git_operations": [],
+            "full_suite": False,
+            "yolo_reason": "STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT",
+        }
+
+    def test_patch_seal_accepts_exact_observed_manifest(self) -> None:
+        receipt = self.patch_seal_receipt()
+        manifest = {
+            "successful_recon": True,
+            "files": receipt["files"],
+            "changed_lines": receipt["changed_lines"],
+            "targeted_tests": receipt["targeted_tests"],
+            "git_operations": [],
+            "full_suite": False,
+        }
+
+        self.assertEqual(
+            QWEN_ASSIST.validate_patch_seal_receipt(receipt),
+            {"status": "PATCH_SEAL_RECEIPT_READY"},
+        )
+        self.assertEqual(
+            QWEN_ASSIST.validate_patch_seal_manifest(receipt, manifest),
+            {"status": "SEALED_CANDIDATE"},
+        )
+
+    def test_patch_seal_rejects_non_integer_targeted_exit_code(self) -> None:
+        receipt = self.patch_seal_receipt()
+        receipt["targeted_exit_code"] = False
+
+        self.assertEqual(
+            QWEN_ASSIST.validate_patch_seal_receipt(receipt),
+            {"status": "QWEN_UNUSABLE", "reason": "MALFORMED_PATCH_SEAL_RECEIPT"},
+        )
+
+    def test_patch_seal_rejects_ineligible_or_out_of_scope_receipt(self) -> None:
+        receipt = self.patch_seal_receipt()
+        receipt["yolo_reason"] = "QWEN_COMMAND_FAILED"
+        self.assertEqual(
+            QWEN_ASSIST.validate_patch_seal_receipt(receipt),
+            {"status": "QWEN_UNUSABLE", "reason": "PATCH_SEAL_NOT_ELIGIBLE"},
+        )
+
+        for field, value, reason in (
+            ("files", ["a.py", "b.py", "c.py"], "PATCH_SCOPE_EXCEEDED"),
+            ("changed_lines", 201, "PATCH_SCOPE_EXCEEDED"),
+            ("git_operations", ["commit"], "GIT_INTEGRATION_FORBIDDEN"),
+            ("full_suite", True, "GIT_INTEGRATION_FORBIDDEN"),
+        ):
+            receipt = self.patch_seal_receipt()
+            receipt[field] = value
+            self.assertEqual(
+                QWEN_ASSIST.validate_patch_seal_receipt(receipt),
+                {"status": "QWEN_UNUSABLE", "reason": reason},
+            )
+
+    def test_patch_seal_rejects_manifest_that_differs_from_observed_receipt(self) -> None:
+        receipt = self.patch_seal_receipt()
+        manifest = {
+            "successful_recon": True,
+            "files": receipt["files"],
+            "changed_lines": receipt["changed_lines"],
+            "targeted_tests": receipt["targeted_tests"],
+            "git_operations": [],
+            "full_suite": False,
+        }
+
+        for field, value in (
+            ("files", ["tests/test_qwen_assist.py"]),
+            ("changed_lines", 13),
+            ("targeted_tests", ["python -m unittest another.test"]),
+        ):
+            changed_manifest = dict(manifest)
+            changed_manifest[field] = value
+            self.assertEqual(
+                QWEN_ASSIST.validate_patch_seal_manifest(receipt, changed_manifest),
+                {"status": "QWEN_UNUSABLE", "reason": "PATCH_SEAL_MANIFEST_MISMATCH"},
+            )
+
     def test_patch_candidate_enforces_small_diff_and_no_git_integration(self) -> None:
         candidate = {
             "successful_recon": True,
