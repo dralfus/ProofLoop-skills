@@ -21,6 +21,10 @@ param(
 
     [string]$PatchSealReceiptPath,
 
+    [string]$TicketId,
+
+    [string]$SealLedgerDirectory = (Join-Path $env:LOCALAPPDATA 'ProofLoop Skills\qwen-seal-ledger'),
+
     [string]$Baseline,
 
     [ValidatePattern('^[A-Za-z0-9._/-]+$')]
@@ -55,11 +59,17 @@ if ($ApprovalMode -eq 'seal') {
     if ($Worktree -notmatch '^qwen-patch-') { throw 'ApprovalMode seal requires a qwen-patch- worktree.' }
     if (-not $ReconReportPath -or -not (Test-Path -LiteralPath $ReconReportPath)) { throw 'ApprovalMode seal requires an existing -ReconReportPath.' }
     if (-not $Baseline -or $Baseline -ne ((& git rev-parse HEAD).Trim())) { throw 'ApprovalMode seal requires -Baseline matching current HEAD.' }
-    $reconValidation = python "$PSScriptRoot\qwen_assist.py" --validate-recon (Get-Content -Raw -LiteralPath $ReconReportPath) | ConvertFrom-Json
+    $reconReport = Get-Content -Raw -LiteralPath $ReconReportPath
+    $reconValidation = python "$PSScriptRoot\qwen_assist.py" --validate-recon $reconReport | ConvertFrom-Json
     if ($reconValidation.status -ne 'EVIDENCE_FOUND') { throw 'ApprovalMode seal requires schema-valid recon evidence.' }
+    if (($reconReport | ConvertFrom-Json).baseline -ne $Baseline) { throw 'ApprovalMode seal requires recon baseline matching -Baseline.' }
     if (-not $PatchSealReceiptPath -or -not (Test-Path -LiteralPath $PatchSealReceiptPath)) { throw 'ApprovalMode seal requires an existing -PatchSealReceiptPath.' }
-    $sealValidation = python "$PSScriptRoot\qwen_assist.py" --validate-patch-seal-receipt (Get-Content -Raw -LiteralPath $PatchSealReceiptPath) | ConvertFrom-Json
-    if ($sealValidation.status -ne 'PATCH_SEAL_RECEIPT_READY') { throw 'ApprovalMode seal requires a schema-valid observed receipt.' }
+    if (-not $TicketId) { throw 'ApprovalMode seal requires -TicketId.' }
+    $patchSealReceipt = Get-Content -Raw -LiteralPath $PatchSealReceiptPath
+    $sealValidation = python "$PSScriptRoot\qwen_assist.py" --validate-patch-seal-receipt $patchSealReceipt --expected-baseline $Baseline | ConvertFrom-Json
+    if ($sealValidation.status -ne 'PATCH_SEAL_RECEIPT_READY') { throw 'ApprovalMode seal requires a schema-valid observed receipt bound to baseline.' }
+    $sealReservation = python "$PSScriptRoot\qwen_assist.py" --reserve-patch-seal --patch-seal-receipt $patchSealReceipt --ticket-id $TicketId --seal-store $SealLedgerDirectory | ConvertFrom-Json
+    if ($sealReservation.status -ne 'PATCH_SEAL_RESERVED') { throw "ApprovalMode seal refused: $($sealReservation.reason)." }
 }
 
 $requiredMarkers = @(
@@ -88,6 +98,7 @@ if ($AuthType) {
     $authArgs = @('--auth-type', $AuthType)
 }
 $effectiveApprovalMode = if ($ApprovalMode -eq 'seal') { 'plan' } else { $ApprovalMode }
+$effectivePrompt = if ($ApprovalMode -eq 'seal') { "$Prompt`nPATCH_SEAL_RECEIPT:`n$patchSealReceipt`nReturn only the patch manifest for this receipt." } else { $Prompt }
 $excludedTools = if ($effectiveApprovalMode -eq 'plan') { 'Agent,edit,notebook_edit,run_shell_command' } else { 'Agent,run_shell_command' }
 
 . "$PSScriptRoot\qwen_credential.ps1"
@@ -117,7 +128,7 @@ try {
         '--max-subagent-depth' '1' `
         '--exclude-tools' $excludedTools `
         '--disabled-slash-commands' 'review,loop' `
-        '--prompt' $Prompt
+        '--prompt' $effectivePrompt
     $exitCode = $LASTEXITCODE
 }
 finally {

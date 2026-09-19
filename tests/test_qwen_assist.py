@@ -295,6 +295,31 @@ class QwenAssistTest(unittest.TestCase):
             {"status": "QWEN_UNUSABLE", "reason": "MALFORMED_PATCH_SEAL_RECEIPT"},
         )
 
+    def test_patch_seal_rejects_boolean_changed_lines_and_wrong_baseline(self) -> None:
+        receipt = self.patch_seal_receipt()
+        receipt["changed_lines"] = True
+        self.assertEqual(
+            QWEN_ASSIST.validate_patch_seal_receipt(receipt),
+            {"status": "QWEN_UNUSABLE", "reason": "PATCH_SCOPE_EXCEEDED"},
+        )
+
+        receipt = self.patch_seal_receipt()
+        self.assertEqual(
+            QWEN_ASSIST.validate_patch_seal_receipt(receipt, expected_baseline="def456"),
+            {"status": "QWEN_UNUSABLE", "reason": "PATCH_SEAL_BASELINE_MISMATCH"},
+        )
+
+    def test_patch_seal_reservation_allows_one_call_per_ticket(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            seal_store = Path(temporary_directory)
+            self.assertEqual(
+                QWEN_ASSIST.reserve_patch_seal("314", self.patch_seal_receipt(), seal_store),
+                {"status": "PATCH_SEAL_RESERVED"},
+            )
+            self.assertEqual(
+                QWEN_ASSIST.reserve_patch_seal("314", self.patch_seal_receipt(), seal_store),
+                {"status": "QWEN_UNUSABLE", "reason": "PATCH_SEAL_ALREADY_USED"},
+            )
     def test_patch_seal_rejects_ineligible_or_out_of_scope_receipt(self) -> None:
         receipt = self.patch_seal_receipt()
         receipt["yolo_reason"] = "QWEN_COMMAND_FAILED"
@@ -350,6 +375,24 @@ class QwenAssistTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(json.loads(completed.stdout), {"status": "PATCH_SEAL_RECEIPT_READY"})
 
+    def test_cli_validates_terminal_patch_seal_manifest(self) -> None:
+        receipt = self.patch_seal_receipt()
+        manifest = {
+            "successful_recon": True,
+            "files": receipt["files"],
+            "changed_lines": receipt["changed_lines"],
+            "targeted_tests": receipt["targeted_tests"],
+            "git_operations": [],
+            "full_suite": False,
+        }
+        completed = subprocess.run(
+            [
+                sys.executable, str(MODULE_PATH), "--validate-patch-seal-manifest", json.dumps(manifest),
+                "--patch-seal-receipt", json.dumps(receipt),
+            ], check=False, capture_output=True, text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(json.loads(completed.stdout), {"status": "SEALED_CANDIDATE"})
     def test_patch_candidate_enforces_small_diff_and_no_git_integration(self) -> None:
         candidate = {
             "successful_recon": True,

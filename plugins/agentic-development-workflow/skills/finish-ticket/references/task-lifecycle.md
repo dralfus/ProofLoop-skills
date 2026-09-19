@@ -626,3 +626,4 @@ Qwen must emit the existing patch schema. Only an exact match between that
 Qwen manifest and the receipt becomes `SEALED_CANDIDATE`. A missing or mismatched
 manifest is terminal `QWEN_UNUSABLE`: no retry and no transfer. Seal consumes
 one ticket Qwen call and grants neither acceptance nor transfer authority.
+Runtime atomically reserves that sole ticket call, supplies the raw-free receipt to Qwen, and emits `SEALED_CANDIDATE` only after the capture reader exactly compares its terminal manifest.

@@ -42,7 +42,7 @@ class QwenCredentialTest(unittest.TestCase):
 
         self.assertIn("ValidateSet('plan', 'yolo', 'seal')", runner)
         self.assertIn("[string]$ApprovalMode = 'plan'", runner)
-        self.assertIn("-ApprovalMode '$ApprovalMode'", runner)
+        self.assertIn("-ApprovalMode $(Quote-PowerShellLiteral $ApprovalMode)", runner)
         self.assertIn("[switch]$SuccessfulRecon", runner)
         self.assertIn("Candidate modes require -SuccessfulRecon", runner)
 
@@ -51,7 +51,10 @@ class QwenCredentialTest(unittest.TestCase):
 
         self.assertIn("ValidateSet('plan', 'yolo', 'seal')", runner)
         self.assertIn("[string]$PatchSealReceiptPath", runner)
-        self.assertIn("-PatchSealReceiptPath '$PatchSealReceiptPath'", runner)
+        self.assertIn("Quote-PowerShellLiteral", runner)
+        self.assertIn("-PatchSealReceiptPath", runner)
+        self.assertIn("[string]$TicketId", runner)
+        self.assertIn("[string]$SealLedgerDirectory", runner)
 
     def test_capture_reader_reports_running_or_terminal_file_output(self) -> None:
         self.assertTrue(CAPTURE_READER.is_file())
@@ -65,6 +68,9 @@ class QwenCredentialTest(unittest.TestCase):
         self.assertIn("[string]$RunId", reader)
         self.assertIn("ValidatePattern", reader)
         self.assertIn("Join-Path $CaptureDirectory $RunId", reader)
+        self.assertIn("[string]$PatchSealReceiptPath", reader)
+        self.assertIn("--validate-patch-seal-manifest", reader)
+        self.assertIn("SEALED_CANDIDATE", reader)
 
 
     def test_patch_candidate_schema_matches_the_bounded_candidate_contract(self) -> None:

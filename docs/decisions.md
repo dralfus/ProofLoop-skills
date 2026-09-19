@@ -591,3 +591,5 @@ terminal `QWEN_UNUSABLE`, no retry and no transfer. Seal расходует од
 
 Критерий: isolated smoke проходит `yolo` unsealed diff -> receipt -> Qwen
 plan-seal manifest, после чего candidate всё ещё требует independent review.
+
+D027 runtime enforcement: atomically reserve the ticket's sole seal call, include PATCH_SEAL_RECEIPT in Qwen's packet, and emit SEALED_CANDIDATE only after capture-reader exact terminal-manifest comparison.
