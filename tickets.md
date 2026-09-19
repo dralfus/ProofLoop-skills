@@ -85,6 +85,14 @@ is bridge evidence, not Ticket 314 acceptance evidence.
 2-file/8-line candidate, but both write runs ended exit `53` without terminal
 patch manifest; the write-output branch remains `QWEN_UNUSABLE` and stops same-root retries.
 
+**Update (2026-09-19):** A new minimal, isolated manifest smoke narrowed the
+failure: schema-valid `plan` recon completed in two turns, while `yolo` applied
+exactly one file/11-line test-only change and its targeted test passed, but
+again ended at the 12-turn limit with no terminal manifest. Thus the remaining
+blocker is the Qwen `yolo` structured-output completion path, not Ticket 314
+scope, authentication, capture transport, or an inability to write the patch.
+See `docs/experiments/qwen-assist-manifest-smoke-2026-09-19.md`.
+
 **Что реализовать:** После подтверждённого recon Qwen может создать небольшой
 candidate diff в своей worktree. Codex independently проверяет candidate и сам
 переносит только одобренное изменение; Qwen не выполняет Git-интеграцию.
