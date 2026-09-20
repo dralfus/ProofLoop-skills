@@ -264,3 +264,55 @@ for the seal output contract. See
 - [x] Check использует существующий packet и Reviewer без новой роли или команды.
 - [x] Qwen и тяжёлые ticket исключены; acceptance authority не ослаблена.
 - [x] Pilot измеряет diff, launches, repair/context, usage, scope drift и outcome.
+
+## 16. Guarded launcher native Qwen Code
+
+**Что реализовать:** Оператор запускает native Qwen `$finish-ticket` через
+отдельный ProofLoop-owned launcher, который проверяет допустимую local
+configuration и extension, передаёт outer runtime limits и создаёт raw-free
+receipt без изменения пользовательских настроек или чужих runners.
+
+**Blocked by:** None — can start immediately.
+
+**Status:** ready-for-agent.
+
+- [ ] Launcher блокирует safe-mode, disabled loop detection, nesting глубже
+  одного уровня и отсутствующий ProofLoop extension до ticket work.
+- [ ] Launcher не выводит secret и не изменяет `qwen.cmd`, user settings,
+  endpoint, model или API key.
+- [ ] Launcher создаёт локальный raw-free `QWEN_SESSION_GUARD` receipt с
+  launch identity, mode и effective limits.
+
+## 17. Lifecycle gate и terminal stop guarded Qwen session
+
+**Что реализовать:** Native Qwen Controller запускает role-agent только при
+fresh compatible `QWEN_SESSION_GUARD` и останавливает exhausted или повторный
+runtime loop без автоматического continuation.
+
+**Blocked by:** 16. Guarded launcher native Qwen Code.
+
+**Status:** ready-for-agent.
+
+- [ ] Missing, stale или несовместимый receipt возвращает
+  `BLOCKED_CAPABILITY` до role dispatch.
+- [ ] Budget exhaustion, loop detection или повтор tool fingerprint дают
+  `QWEN_RUNTIME_GUARD_STOP` без нового role launch.
+- [ ] Fresh continuation требует нового reproducible evidence и сохраняет
+  append-only QWEN ledger; acceptance authority не меняется.
+
+## 18. Режимы Qwen и controlled pilot guard
+
+**Что реализовать:** Оператор получает документированные режимы `recon` и
+`protocol`, а workflow — fixtures и малый pilot, проверяющие guard без
+неподтверждённых заявлений об улучшении Qwen.
+
+**Blocked by:** 16. Guarded launcher native Qwen Code; 17. Lifecycle gate и terminal stop guarded Qwen session.
+
+**Status:** ready-for-agent.
+
+- [ ] `recon` использует малый budget без thinking; `protocol` включает
+  thinking и output limit не меньше 8000, не задавая sampling defaults.
+- [ ] Packet подаётся по-английски с требованием русского ответа; model name
+  не становится version allow-list.
+- [ ] Fixtures и pilot публикуют raw-free guard outcome, terminal reason,
+  duration, mode и доступные turn/tool counters.

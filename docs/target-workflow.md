@@ -109,6 +109,12 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
   `NEW_REQUIREMENT`, `DESIGN_GAP` или scope expansion останавливают loop.
   Qwen delivery extension публикует тот же canonical skill/lifecycle и named
   Controller agent; Codex numeric policy не меняется.
+- Native Qwen Code получает отдельный `QWEN_SESSION_GUARD` только после
+  реализации tickets 16--18. Guarded launcher проверяет loop detection,
+  extension и outer turn/tool/wall/depth limits, но не меняет sampling,
+  user settings или authority. До появления валидного receipt native Qwen
+  profile возвращает `BLOCKED_CAPABILITY`; budget stop даёт fresh-session
+  control point, а не инерционный resume.
 - `QWEN_ASSIST` — отдельный schema-first внешний worker под управлением Codex
   Controller: capability probe без version pin перед каждым вызовом, чистая
   worktree, максимум семь вызовов и без acceptance authority. Сначала разрешён

@@ -603,3 +603,24 @@ D027 runtime enforcement: atomically reserve the ticket's sole seal call, includ
 Решение: только для eligible ordinary non-Qwen Codex ticket Controller может добавить в существующий `IMPLEMENTATION_PACKET` необязательный пятистрочный `MINIMAL_SOLUTION_CHECK`, сформированный из preflight. Он не создаёт agent, tool-call или audit. Reviewer после `SPEC` и `CODE_QUALITY` задаёт один вопрос о доказанной простой альтернативе; finding остаётся `QUALITY_BLOCKER`. Qwen, critical/resumed/partial, security, concurrency, native/UI, design-gap и unproven-seam ticket исключены.
 
 Критерий успеха: после десяти применимых ticket хотя бы один наблюдаемый дорогой показатель уменьшается без роста scope drift, repair или acceptance failures. LOC сам по себе не является доказательством; при отсутствии выгоды check удаляется отдельным решением.
+
+## D029 — Guarded native Qwen session до dispatch `$finish-ticket`
+
+Статус: принято 2026-09-20; реализация запланирована tickets 16--18.
+
+Наблюдаемый failure: server-side sampling defaults устраняют языковые
+артефакты, но Qwen может начать работу без required skill либо повторять
+одинаковые tool calls до встроенного watchdog. Текстовое обещание модели не
+является доказательством фактических runtime limits.
+
+Решение: добавить отдельный ProofLoop-owned launcher для native Qwen Code.
+Он не меняет `qwen.cmd`, пользовательские настройки, endpoint или API key;
+до запуска проверяет loop detection, depth, extension и создаёт raw-free
+`QWEN_SESSION_GUARD` receipt. Native Qwen Controller до role dispatch требует
+fresh receipt. Исчерпание turn/tool/wall budget, streaming-loop detection или
+повтор инструментального fingerprint создают `QWEN_RUNTIME_GUARD_STOP` и
+требуют fresh session с новым evidence. `QWEN_ASSIST` не изменяется.
+
+Критерий успеха: в серии из трёх guarded native Qwen sessions нет dispatch без
+receipt и нет continuation после budget/fingerprint stop; измеряются только
+raw-free guard outcome, terminal reason, mode, duration и доступные counters.

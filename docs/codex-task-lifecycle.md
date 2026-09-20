@@ -46,6 +46,15 @@ skill discoverable и добавляет named agent `finish-ticket-controller`;
 proofloop-skills`. Полная процедура первого real pilot и его текущий статус
 `NOT_RUN` описаны в `experiments/qwen-code-v0222-pilot.md`.
 
+### Planned guarded native Qwen launch
+
+Текущий native Qwen extension ещё не требует `QWEN_SESSION_GUARD`; это будет
+реализовано tickets 16--18. После реализации отдельный ProofLoop launcher
+проверит user-side loop detection, extension и технические session limits, не
+изменяя `~/.qwen/settings.json`, API key, server defaults или сторонние Qwen
+runners. До тех пор не считайте prompt или sampling доказательством соблюдения
+skill; `QWEN_ASSIST` из Codex Desktop остаётся отдельным bounded bridge.
+
 ## Запуск одного ticket
 
 Открыть корень проекта в Codex и отправить:

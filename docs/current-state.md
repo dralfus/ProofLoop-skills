@@ -160,3 +160,13 @@ skill.
 ## Наблюдаемый failure mode 12: избыточное решение ordinary ticket
 
 У ordinary ticket новый helper, abstraction или dependency могут заменять уже доступное решение. Постоянный minimalism prompt для всех ролей способен увеличить reasoning usage, поэтому применяется только измеряемый `MINIMAL_SOLUTION_CHECK` внутри existing packet.
+
+## Наблюдаемый failure mode 13: native Qwen запускается без внешнего session guard
+
+Server-side sampling defaults устраняют языковые артефакты, но не доказывают,
+что native Qwen применит required skill или прекратит повторные tool calls.
+Текущий `QWEN_CONVERGENT` ledger останавливает non-progress между
+repair-candidates, но не ограничивает сам процесс Qwen до watchdog. Принятая
+доработка вводит отдельный ProofLoop-owned guarded launcher, raw-free receipt
+и технические limits; до реализации это целевое состояние, а не действующий
+capability gate.
