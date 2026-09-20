@@ -269,6 +269,10 @@ ordinary ticket отчёт является объявленным планом:
 Сначала зафиксировать отдельное design-решение. Не проектировать эти решения
 внутри repair-loop.
 
+## MINIMAL_SOLUTION_CHECK
+
+Это необязательное ограничение только для eligible ordinary non-Qwen Codex ticket. Когда preflight уже показывает правдоподобный выбор reuse/platform/existing dependency против нового кода, Controller добавляет в `IMPLEMENTATION_PACKET` пятистрочный block из [`references/minimal-solution-check.md`](minimal-solution-check.md). Он не повторяет discovery, не создаёт новую роль или tool-call и не применяется к critical/resumed/security/concurrency/native/UI/design-gap/unproven-seam ticket. Check не уменьшает criteria, тесты, security, validation, evidence, review, Verifier или full suite.
+
 ## Выбор модели и effort
 
 Сначала проверить фактический verified inventory текущего multi-agent
@@ -394,7 +398,7 @@ pending job, а `full_suite` — только один на ticket.
 1. Создать одного Implementer с `IMPLEMENTATION_PACKET`: baseline, только
    применимые acceptance criteria, `SEAM_FEASIBILITY`, включая production
    consumer/compatibility command для изменённой injectable boundary, разрешённый scope,
-   targeted RED/GREEN commands, stop gates и открытые findings. Это единственный
+   targeted RED/GREEN commands, stop gates и открытые findings. При eligibility packet может содержать пятистрочный `MINIMAL_SOLUTION_CHECK`; он ограничивает scope, но не criteria или evidence. Это единственный
    handoff; transcript Controller, неприменимые части spec и повторное чтение
    неизменённых входных документов не передаются. Дополнительный файл допустим
    лишь как прямая dependency указанного production entry point.
@@ -408,7 +412,7 @@ pending job, а `full_suite` — только один на ticket.
    `SPEC` и `CODE_QUALITY`, включая compatibility evidence каждого
    production-shaped consumer изменённой injectable boundary. Evidence только
    через fake/injected seam без такого consumer даёт `REGRESSION` и `FAIL`.
-   Reviewer не изменяет файлы, не создаёт agents и не запускает full suite.
+   После обычных verdicts при наличии check он задаёт один вопрос из `minimal-solution-check.md` и возвращает `MINIMAL_SOLUTION`. Доказанная простая альтернатива — обычный `QUALITY_BLOCKER`, а не отдельная acceptance authority. Reviewer не изменяет файлы, не создаёт agents и не запускает full suite.
 4. При любом `FAIL` не запускать Verifier. Классифицировать findings и провести
    adjudication. Reviewer возвращает `SCOPED_PASS`, если его scoped repair
    корректен, но ledger содержит хотя бы один `open` criterion; это не
@@ -490,6 +494,7 @@ Reviewer:
 ```text
 SPEC: PASS | SCOPED_PASS | FAIL
 CODE_QUALITY: PASS | FAIL
+MINIMAL_SOLUTION: PASS | FINDING | NOT_APPLICABLE
 Fixed point и diff: <значения>
 Acceptance: <критерий -> evidence>
 Acceptance ledger: <критерий -> status; незакрытые criteria обязательны>
@@ -601,6 +606,8 @@ adjudication, число fix-раундов, сработавшие stop gates, 
 budget counters, compaction/checkpoint, `TEST_PERMIT`/`JOB_REJECTED`, состояние
 acceptance ledger, `FAILURE_SUMMARY`/`FAILURE_PROJECTION` и итоговый статус. К
 каждой закрытой или отклонённой попытке также сохраняется `TOKEN_USAGE`.
+
+Для применимого `MINIMAL_SOLUTION_CHECK` дополнительно сохранить applied/omitted/`NOT_APPLICABLE` и причину, production/test diff отдельно, role-agent launches, tool-call classes, fix rounds, context reuse, model/tier/effort, observed usage, review/verification outcome, scope drift и stop reason. Эти данные являются pilot-метрикой, а не заявлением об экономии токенов.
 
 `DONE` разрешён только при независимых `SPEC: PASS`, `CODE_QUALITY: PASS` и
 достаточном `ACCEPTED` evidence по каждому acceptance criterion.

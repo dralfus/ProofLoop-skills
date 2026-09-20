@@ -296,3 +296,7 @@ terminal `QWEN_UNUSABLE`, with no retry and no transfer. Seal gives Qwen no
 acceptance, Git, full-suite, network/MCP, shell or subagent authority.
 
 Runtime enforcement atomically reserves the ticket's sole seal call, includes PATCH_SEAL_RECEIPT in Qwen's packet, and emits SEALED_CANDIDATE only after capture-reader exact terminal-manifest comparison.
+
+## Условная проверка минимального решения
+
+Для eligible ordinary non-Qwen Codex ticket Controller может добавить `MINIMAL_SOLUTION_CHECK` в существующий packet. Он использует только уже известный scope; отдельные agent, command и audit не запускаются. Check не изменяет criteria, tests, security/validation, review, Verifier, full suite или authority; полезность подтверждается pilot-метрикой, а не LOC.

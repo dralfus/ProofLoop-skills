@@ -256,3 +256,11 @@ bounded unsealed yolo diff and green targeted test, but its one read-only
 `SEALED_CANDIDATE` or transfer was created; this is terminal `QWEN_UNUSABLE`
 for the seal output contract. See
 `docs/experiments/qwen-assist-patch-seal-smoke-2026-09-19.md`.
+
+## 15. Условный `MINIMAL_SOLUTION_CHECK` для ordinary non-Qwen ticket
+
+**Status:** implemented, local validation pending.
+
+- [x] Check использует существующий packet и Reviewer без новой роли или команды.
+- [x] Qwen и тяжёлые ticket исключены; acceptance authority не ослаблена.
+- [x] Pilot измеряет diff, launches, repair/context, usage, scope drift и outcome.

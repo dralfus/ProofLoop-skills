@@ -31,6 +31,9 @@ description: Использовать для реализации или воз�
    Implementer каждый acceptance criterion обязан иметь `SEAM_FEASIBILITY`.
    Изменённая injectable boundary дополнительно требует named
    production-shaped consumer и compatibility command.
+   Для eligible ordinary non-Qwen ticket Controller читает
+   `references/minimal-solution-check.md` и может добавить его пятистрочный
+   block без отдельного поиска, agent или tool-call.
 
 Проектные инструкции определяют команды, архитектуру и coding standards.
 Протокол skill определяет полномочия ролей, порядок приёмки, health gates и

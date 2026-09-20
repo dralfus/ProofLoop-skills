@@ -593,3 +593,13 @@ terminal `QWEN_UNUSABLE`, no retry and no transfer. Seal расходует од
 plan-seal manifest, после чего candidate всё ещё требует independent review.
 
 D027 runtime enforcement: atomically reserve the ticket's sole seal call, include PATCH_SEAL_RECEIPT in Qwen's packet, and emit SEALED_CANDIDATE only after capture-reader exact terminal-manifest comparison.
+
+## D028 — Условно проверять минимальное решение ordinary non-Qwen ticket
+
+Статус: принято 2026-09-20.
+
+Наблюдаемый failure: ordinary ticket может получить новый код, abstraction или dependency вместо уже доступного reuse/platform/installed dependency. Постоянный prompt для всех ролей не доказал экономию reasoning-моделей и может увеличить input/reasoning usage.
+
+Решение: только для eligible ordinary non-Qwen Codex ticket Controller может добавить в существующий `IMPLEMENTATION_PACKET` необязательный пятистрочный `MINIMAL_SOLUTION_CHECK`, сформированный из preflight. Он не создаёт agent, tool-call или audit. Reviewer после `SPEC` и `CODE_QUALITY` задаёт один вопрос о доказанной простой альтернативе; finding остаётся `QUALITY_BLOCKER`. Qwen, critical/resumed/partial, security, concurrency, native/UI, design-gap и unproven-seam ticket исключены.
+
+Критерий успеха: после десяти применимых ticket хотя бы один наблюдаемый дорогой показатель уменьшается без роста scope drift, repair или acceptance failures. LOC сам по себе не является доказательством; при отсутствии выгоды check удаляется отдельным решением.

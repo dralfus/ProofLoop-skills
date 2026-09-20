@@ -123,3 +123,5 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
 stop conditions; при отсутствующей capability подтвердить
 `BLOCKED_CAPABILITY`. После завершения сравнить число запусков, тестов,
 исправлений и расхода контекста в раннем критичном pilot.
+
+Для eligible ordinary non-Qwen ticket preflight может добавить пятистрочный `MINIMAL_SOLUTION_CHECK` в тот же `IMPLEMENTATION_PACKET`. Он не создаёт agent/tool-call, не применяется к critical/resumed/security/concurrency/native/UI/design-gap/unproven-seam ticket и не меняет acceptance gates. После десяти применимых ticket pilot сравнивает diff, launches, repair/context, observed usage, scope drift и outcome; LOC не доказывает экономию.

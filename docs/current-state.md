@@ -156,3 +156,7 @@ Sandbox job.
 нескольких файлов и большой стартовый prompt создают дублирование, drift и
 лишний контекст. Исполняемый протокол теперь поставляется одним глобальным
 skill.
+
+## Наблюдаемый failure mode 12: избыточное решение ordinary ticket
+
+У ordinary ticket новый helper, abstraction или dependency могут заменять уже доступное решение. Постоянный minimalism prompt для всех ролей способен увеличить reasoning usage, поэтому применяется только измеряемый `MINIMAL_SOLUTION_CHECK` внутри existing packet.

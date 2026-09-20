@@ -1300,14 +1300,19 @@ def validate(plugin_root: Path) -> None:
     assert (runtime / "SKILL.md").is_file()
     protocol = runtime / "references/task-lifecycle.md"
     model_escalation = runtime / "references/model-escalation.md"
+    minimal_solution_check = runtime / "references/minimal-solution-check.md"
     assert protocol.is_file()
     assert model_escalation.is_file()
+    assert minimal_solution_check.is_file()
 
     protocol_text = protocol.read_text(encoding="utf-8")
     assert f"Версия workflow: `{REQUIRED_PROTOCOL_VERSION}`" in protocol_text
     missing = [term for term in REQUIRED_CONTRACT_TERMS if term not in protocol_text]
     assert not missing, f"runtime adapter contract is missing: {missing}"
     escalation_text = model_escalation.read_text(encoding="utf-8")
+    minimal_solution_text = minimal_solution_check.read_text(encoding="utf-8")
+    assert "ordinary non-Qwen" in minimal_solution_text
+    assert "ровно пять строк" in minimal_solution_text
     for term in ("Luna-first", "EFFICIENT_TIER_DEFICIENCY", "TOKEN_USAGE"):
         assert term in escalation_text, f"model escalation reference is missing: {term}"
 
