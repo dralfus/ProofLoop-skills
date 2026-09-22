@@ -86,6 +86,11 @@ qwen extensions install .
 `BLOCKED_CAPABILITY`. Процедура реального pilot и текущее честное состояние
 `NOT_RUN` находятся в `docs/experiments/qwen-code-v0222-pilot.md`.
 
+Для отдельного bounded анализа launcher поддерживает explicit native `recon`
+mode: clean fixed-point worktree, `qwen.cmd`, plan-mode tool exclusions,
+structured JSON/schema и малый budget. Recon не запускает `/finish-ticket`,
+role-agent или acceptance; existing `protocol` argv contract остаётся exact.
+
 ## Лицензия
 
 `Unlicense`: материалы можно использовать без ограничений; они поставляются

@@ -46,14 +46,64 @@ skill discoverable и добавляет named agent `finish-ticket-controller`;
 proofloop-skills`. Полная процедура первого real pilot и его текущий статус
 `NOT_RUN` описаны в `experiments/qwen-code-v0222-pilot.md`.
 
-### Planned guarded native Qwen launch
+### Guarded native Qwen launch
 
-Текущий native Qwen extension ещё не требует `QWEN_SESSION_GUARD`; это будет
-реализовано tickets 16--18. После реализации отдельный ProofLoop launcher
-проверит user-side loop detection, extension и технические session limits, не
-изменяя `~/.qwen/settings.json`, API key, server defaults или сторонние Qwen
-runners. До тех пор не считайте prompt или sampling доказательством соблюдения
-skill; `QWEN_ASSIST` из Codex Desktop остаётся отдельным bounded bridge.
+Для `$finish-ticket` используйте ProofLoop launcher, передав путь к уже
+установленному ProofLoop extension. Например:
+
+```powershell
+.\scripts\invoke_qwen_finish_ticket.ps1 -Ticket 16 -ExtensionRoot <installed-proofloop-extension-root>
+```
+
+Launcher только читает `~/.qwen/settings.json` и extension manifest, блокирует
+недопустимую local configuration до запуска Qwen, передаёт bounded outer limits и
+пишет raw-free `QWEN_SESSION_GUARD` receipt в `%LOCALAPPDATA%\ProofLoop Skills`.
+Перед ticket work launcher проверяет обязательные CLI capabilities и canonical
+argv compatibility; версия Qwen только сохраняется в отдельном smoke evidence и
+не используется как allow-list. Он не меняет settings, API key, endpoint, model,
+`qwen.cmd` или сторонние runners. `QWEN_ASSIST` из Codex Desktop остаётся
+отдельным bounded bridge.
+
+### Native guarded `recon`
+
+Native launcher имеет отдельный explicit `-Mode recon`; это не сокращённый
+`protocol` и не `/finish-ticket`. Он принимает только clean fixed-point
+worktree, запускает `qwen.cmd` из этого worktree с `--bare`,
+`--approval-mode plan`, JSON/schema output и limits `3 turns / 6 tool calls / 5m /
+depth 1`. Qwen CLI требует 1-based `--max-subagent-depth`; фактический запрет
+subagent обеспечивается `--exclude-tools Agent`. Путь не передаётся как значение `--worktree`: Qwen трактует этот
+флаг как slug собственного `.qwen/worktrees/<slug>`. Capability preflight
+требует `--prompt`, `--bare`, `--approval-mode`, `--output-format`,
+`--json-schema`, limits, `--exclude-tools` и
+`--disabled-slash-commands`; отсутствие любого marker блокирует запуск.
+
+Command contract фиксирует исключение `Agent,edit,notebook_edit,run_shell_command`,
+отключает `review,loop` и использует bounded prompt с одной read-only
+инспекцией и одним `structured_output`; parent передаёт и повторно проверяет
+точный fixed-point baseline. Recon не пишет,
+не реализует, не запускает shell/tests/Git/network/MCP, review/yolo, role-agent,
+subagent или acceptance. Wrapper повторно валидирует terminal JSON против
+`QWEN_RECON_REPORT` schema и публикует raw-free `QWEN_RECON_GUARD` receipt.
+
+`QWEN_RECON_READY` означает только schema-valid read-only report;
+`QWEN_JSON_ERROR_RESULT` означает JSON error envelope; launcher сохраняет только
+raw-free признаки `is_error`, `subtype` и категорию вложенного `error.message`.
+Классификатор принимает как terminal `result`, так и top-level envelope на
+stdout/stderr; для второго варианта он публикует отдельные поля
+`envelope_is_error`, `envelope_subtype`, `envelope_error_message_present` и
+`envelope_error_message_category`, не раскрывая текст ошибки.
+`QWEN_UNUSABLE` — malformed/forbidden output, а budget/loop/fingerprint дают
+`QWEN_RUNTIME_GUARD_STOP`. Terminal recon ledger закрыт навсегда с
+`RECON_TERMINAL_LEDGER_CLOSED`. Fresh independent recon session разрешена
+только с пустым genesis ledger/anchor, новыми `launch_id`, `session_id`,
+`ledger_id` и registry-проверенным `fresh_evidence_id`; non-empty active ledger
+требует exact same receipt, а новый launch получает
+`RECON_ACTIVE_LEDGER_LAUNCH_MISMATCH`. `role_dispatch`, `subagent_dispatch` и
+acceptance всегда false. Existing `protocol` exact argv contract и
+`QWEN_SESSION_GUARD` receipt не меняются.
+
+Ограниченный smoke запускается отдельно и вызывает только `qwen --version` и
+`qwen --help`. Он не запускает `$finish-ticket`, role-agent или acceptance.
 
 ## Запуск одного ticket
 
@@ -106,6 +156,11 @@ fork/write и executable verification command. Любое отсутствие �
 `BLOCKED_CAPABILITY`. Успех фиксирует одну verified identity для всех ролей и
 `usage: AVAILABLE|NOT_AVAILABLE`.
 
+Для Ticket 18 controlled fixture допускается owner-authorized declaration
+`configured_model_id: qwen38-flash-next` с identity source
+`USER_AUTHORIZED_CONFIGURATION`. Server-side active identity не считается
+independently attested; это raw-free limitation evidence, а не новый gate.
+
 Qwen использует `QWEN_CONVERGENT`, а не числовой cap repair-раундов. Ledger
 начинается с baseline/fixed point/open findings. Каждый `local_attempt` хранит
 finding, RED, hypothesis и GREEN, не меняя ticket status; `repair_candidate`
@@ -127,6 +182,17 @@ gates, Codex profile или его numeric budget.
 configured model identity; несовпадение даёт `MODEL_IDENTITY_MISMATCH`.
 Любой policy `BLOCKED` после valid baseline оставляет append-only terminal event
 с непустой причиной, включая `INSUFFICIENT_REPAIR_EVIDENCE`.
+
+Для native Qwen Controller lifecycle gate принимает только fresh compatible
+`QWEN_SESSION_GUARD`: missing, stale или mismatched receipt блокирует role
+dispatch как `BLOCKED_CAPABILITY`. Raw-free runtime observation содержит
+session identity, counters, loop flag, tool fingerprint и reproducible evidence.
+Exhausted turn/tool/wall budget, loop detection или повтор fingerprint добавляют
+`QWEN_RUNTIME_GUARD_STOP` в append-only ledger без нового role launch.
+Continuation требует нового receipt/launch identity и нового reproducible
+evidence; gate не запускает Qwen, Implementer или acceptance и не меняет
+acceptance authority. `ledger_anchor` и цепочка `prev_hash`/`event_hash`
+делают удаление или замену предыдущих событий `BLOCKED_CAPABILITY`.
 
 Boolean capability в Qwen declaration должна быть literal `true`; строковый
 или иной truthy surrogate блокируется. Verification command — только
@@ -296,8 +362,11 @@ terminal manifest означает `QWEN_UNUSABLE` именно для write-out
 
 ## QWEN_PATCH_SEAL
 
-`QWEN_PATCH_SEAL` is a one-call read-only `plan` stage after the exact yolo
-reason `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`. Controller supplies a
+`QWEN_PATCH_SEAL` is a one-call read-only `plan` stage after one of the
+allowlisted terminal reasons `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT` or
+`COLLECTOR_PROJECTION_FAILED`. The second reason is reserved for a Controller
+collector failure after independently observed diff/test evidence; it does not
+claim a Qwen terminal reason. Controller supplies a
 raw-free `PATCH_SEAL_RECEIPT` with independently observed bounded scope and one
 green targeted test; it does not synthesize the manifest. Only Qwen's exact
 patch-schema result becomes `SEALED_CANDIDATE`. Missing or mismatched output is

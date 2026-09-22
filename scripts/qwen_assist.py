@@ -14,6 +14,10 @@ MAX_ATTEMPTS = 7
 MAX_RECON_TURNS = 12
 MAX_RECON_TOOL_CALLS = 20
 MAX_RECON_WALL_TIME = "10m"
+PATCH_SEAL_ELIGIBLE_REASONS = {
+    "STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT",
+    "COLLECTOR_PROJECTION_FAILED",
+}
 REQUIRED_CAPABILITY_MARKERS = {
     "non_interactive_prompt": "--prompt",
     "bare_mode": "--bare",
@@ -250,7 +254,7 @@ def validate_patch_seal_receipt(
         return {"status": "QWEN_UNUSABLE", "reason": "MALFORMED_PATCH_SEAL_RECEIPT"}
     if targeted_exit_code != 0:
         return {"status": "QWEN_UNUSABLE", "reason": "TARGETED_TEST_NOT_GREEN"}
-    if receipt.get("yolo_reason") != "STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT":
+    if receipt.get("yolo_reason") not in PATCH_SEAL_ELIGIBLE_REASONS:
         return {"status": "QWEN_UNUSABLE", "reason": "PATCH_SEAL_NOT_ELIGIBLE"}
     candidate = {
         "successful_recon": True,

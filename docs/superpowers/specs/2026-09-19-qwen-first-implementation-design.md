@@ -25,8 +25,9 @@ full suite или статус `DONE`.
 
 Добавить отдельный `QWEN_MANIFEST_ONLY` lane. После Controller-наблюдаемого
 receipt Qwen получает только raw-free receipt и точную инструкцию вернуть
-существующий patch-schema JSON. Этот вызов не читает код и не использует
-tools: `plan`, `--bare`, `--max-tool-calls 0`, exclusions для Agent/edit/shell,
+существующий patch-schema JSON. Этот вызов не читает код и использует только
+единственный structured-output tool: `plan`, `--bare`, `--max-tool-calls 1`,
+structured-output вызова, exclusions для Agent/edit/shell,
 network/MCP и subagents. Его короткий turn budget отдельный от write packet;
 его величина определяется preflight fixture, а не расширением yolo budget.
 
@@ -69,7 +70,7 @@ Disposable fixture меняет один test-only файл не более че
 
 Один новый disposable pilot завершает весь путь выше с Qwen как автором diff и
 manifest. Дополнительно tests доказывают, что manifest-only launch всегда
-содержит `--max-tool-calls 0`, не получает write/network/subagent tools и не
+содержит `--max-tool-calls 1`, не получает write/network/subagent tools и не
 может выдать `SEALED_CANDIDATE` без exact terminal result.
 
 ## Не входит в scope

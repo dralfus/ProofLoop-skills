@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,10 +12,12 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 HELPER = REPOSITORY_ROOT / "scripts" / "qwen_credential.ps1"
 CAPTURE_RUNNER = REPOSITORY_ROOT / "scripts" / "start_qwen_assist_capture.ps1"
 CAPTURE_READER = REPOSITORY_ROOT / "scripts" / "get_qwen_assist_capture.ps1"
+FINISH_TICKET = REPOSITORY_ROOT / "scripts" / "invoke_qwen_finish_ticket.ps1"
 PATCH_SCHEMA = REPOSITORY_ROOT / "plugins" / "agentic-development-workflow" / "skills" / "finish-ticket" / "references" / "qwen-assist-patch.schema.json"
 CANONICAL_LIFECYCLE = REPOSITORY_ROOT / "plugins" / "agentic-development-workflow" / "skills" / "finish-ticket" / "references" / "task-lifecycle.md"
 QWEN_REFERENCE = REPOSITORY_ROOT / "plugins" / "agentic-development-workflow" / "skills" / "finish-ticket" / "references" / "qwen-assist.md"
 HUMAN_LIFECYCLE = REPOSITORY_ROOT / "docs" / "codex-task-lifecycle.md"
+PWSH = shutil.which("pwsh") or shutil.which("powershell")
 
 
 class QwenCredentialTest(unittest.TestCase):
@@ -71,6 +76,161 @@ class QwenCredentialTest(unittest.TestCase):
         self.assertIn("[string]$PatchSealReceiptPath", reader)
         self.assertIn("--validate-patch-seal-manifest", reader)
         self.assertIn("SEALED_CANDIDATE", reader)
+
+    def test_finish_ticket_collector_normalizes_single_property_collections(self) -> None:
+        collector = FINISH_TICKET.read_text(encoding="utf-8")
+        self.assertIn("@($fact.PSObject.Properties.Name).Count", collector)
+        self.assertNotIn("$fact.PSObject.Properties.Name.Count", collector)
+
+    def test_capture_reader_accepts_single_terminal_result_without_scalar_count_failure(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the capture-reader contract")
+
+        receipt = {
+            "baseline": "abc123",
+            "files": ["tests/test_qwen_assist.py"],
+            "changed_lines": 17,
+            "targeted_tests": [
+                "python -m unittest tests.test_qwen_assist.QwenAssistTest.test_patch_candidate_rejects_zero_changed_lines"
+            ],
+            "targeted_exit_code": 0,
+            "git_operations": [],
+            "full_suite": False,
+            "yolo_reason": "STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT",
+        }
+        manifest = {
+            "successful_recon": True,
+            "files": receipt["files"],
+            "changed_lines": receipt["changed_lines"],
+            "targeted_tests": receipt["targeted_tests"],
+            "git_operations": [],
+            "full_suite": False,
+        }
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            run_id = "a" * 32
+            capture_path = temporary_root / run_id
+            capture_path.mkdir()
+            (capture_path / "stdout.json").write_text(
+                json.dumps(
+                    {
+                        "type": "result",
+                        "is_error": False,
+                        "subtype": "success",
+                        "structured_result": manifest,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (capture_path / "stderr.txt").write_text("", encoding="utf-8")
+            receipt_path = temporary_root / "receipt.json"
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    PWSH,
+                    "-NoProfile",
+                    "-File",
+                    str(CAPTURE_READER),
+                    "-RunId",
+                    run_id,
+                    "-ProcessId",
+                    "2147483647",
+                    "-PatchSealReceiptPath",
+                    str(receipt_path),
+                    "-CaptureDirectory",
+                    str(temporary_root),
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        projection = json.loads(result.stdout)
+        self.assertEqual(projection, {"status": "SEALED_CANDIDATE", "pid": 2147483647})
+        self.assertNotIn("structured_result", result.stdout)
+
+    def test_capture_reader_requires_final_result_event_for_array_output(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the capture-reader contract")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            run_id = "b" * 32
+            capture_path = temporary_root / run_id
+            capture_path.mkdir()
+            (capture_path / "stdout.json").write_text(
+                json.dumps([{"type": "assistant", "content": "not terminal"}]),
+                encoding="utf-8",
+            )
+            (capture_path / "stderr.txt").write_text("", encoding="utf-8")
+            receipt_path = temporary_root / "receipt.json"
+            receipt_path.write_text("{}", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    PWSH,
+                    "-NoProfile",
+                    "-File",
+                    str(CAPTURE_READER),
+                    "-RunId",
+                    run_id,
+                    "-ProcessId",
+                    "2147483647",
+                    "-PatchSealReceiptPath",
+                    str(receipt_path),
+                    "-CaptureDirectory",
+                    str(temporary_root),
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        projection = json.loads(result.stdout)
+        self.assertEqual(
+            projection,
+            {"status": "QWEN_UNUSABLE", "reason": "MISSING_TERMINAL_PATCH_MANIFEST", "pid": 2147483647},
+        )
+        self.assertNotIn("not terminal", result.stdout)
+
+    def test_capture_reader_classifies_empty_stdout_as_missing_manifest(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the capture-reader contract")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            run_id = "c" * 32
+            capture_path = temporary_root / run_id
+            capture_path.mkdir()
+            (capture_path / "stdout.json").write_text("", encoding="utf-8")
+            (capture_path / "stderr.txt").write_text("diagnostic only", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    PWSH,
+                    "-NoProfile",
+                    "-File",
+                    str(CAPTURE_READER),
+                    "-RunId",
+                    run_id,
+                    "-ProcessId",
+                    "2147483647",
+                    "-PatchSealReceiptPath",
+                    str(temporary_root / "receipt.json"),
+                    "-CaptureDirectory",
+                    str(temporary_root),
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout),
+            {"status": "QWEN_UNUSABLE", "reason": "MISSING_TERMINAL_PATCH_MANIFEST", "pid": 2147483647},
+        )
 
 
     def test_patch_candidate_schema_matches_the_bounded_candidate_contract(self) -> None:

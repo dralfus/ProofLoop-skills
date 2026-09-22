@@ -15,6 +15,7 @@
 - Основной цикл
 - Findings и repair-loop
 - Возобновление
+- Guarded Qwen runtime lifecycle
 - Контракты отчётов
 - Token usage report
 - Финальное evidence
@@ -103,6 +104,69 @@ configuration и `usage: AVAILABLE|NOT_AVAILABLE`; отсутствие provider
 Extension ссылается на этот единственный файл lifecycle, не дублирует его;
 короткий запуск — `/finish-ticket ticket <ID или путь>`. Codex adaptive profile
 и его numeric budget остаются без изменений.
+
+### Guarded Qwen runtime lifecycle
+
+Native Qwen Controller допускает role dispatch только при fresh compatible
+`QWEN_SESSION_GUARD` receipt. Receipt содержит только raw-free projection:
+`receipt_type`, `receipt_version`, `launch_id`, `issued_at_utc`, `mode`,
+effective `limits`, `loop_detection` и `extension_available`. Для текущего
+`protocol` profile receipt старше bounded freshness window, отсутствующий или
+несовместимый по identity/mode/limits/control flags даёт
+`BLOCKED_CAPABILITY` до role dispatch.
+
+Каждое runtime observation также является raw-free: session identity, turn/tool
+counters, wall-time counter, loop flag, tool fingerprint и reproducible evidence.
+Исчерпание turn/tool/wall limit, loop detection или повтор fingerprint даёт
+`QWEN_RUNTIME_GUARD_STOP` и append-only `terminal` event; этот результат не
+создаёт новый role launch и не получает acceptance authority.
+
+После terminal event continuation разрешена только с новым `launch_id`, новым
+reproducible evidence id и fresh receipt. Повторное использование остановленной
+session identity даёт `BLOCKED_CAPABILITY`; инерционный resume запрещён. Gate
+сверяет immutable `ledger_anchor` (`ledger_id`, `sequence`, `head_hash`) и
+проверяет hash chain каждого append-only event (`prev_hash`, `event_hash`),
+поэтому удаление или замена prefix блокируется до continuation. Gate является
+pure policy seam: он возвращает raw-free decision и ledger projection, но сам не
+запускает Qwen, Implementer или acceptance.
+
+### Native read-only recon
+
+This is the native read-only recon boundary, separate from the protocol.
+Guarded launcher поддерживает отдельный explicit `recon` mode, который не
+является `/finish-ticket` protocol. Он требует clean fixed-point worktree и
+capability preflight для `qwen.cmd`, `--bare`, `--approval-mode plan`,
+structured JSON/schema output, bounded limits, `--exclude-tools` и
+`--disabled-slash-commands`. Qwen запускается с текущим каталогом,
+установленным в этот validated worktree; путь не передаётся как `--worktree`,
+поскольку Qwen трактует такой аргумент как slug собственного worktree.
+Effective budget: 3 turns, 6 tool calls, 5m и
+`max-subagent-depth 1`; отсутствие доказуемого subagent exclusion даёт
+`BLOCKED_CAPABILITY`.
+
+Fixed command contract исключает `Agent,edit,notebook_edit,run_shell_command`,
+отключает `review,loop` и использует bounded prompt с одной read-only
+инспекцией и одним `structured_output`; parent передаёт и повторно проверяет
+точный fixed-point baseline. Qwen не получает
+write/implementation, shell/tests/Git/network/MCP, review/yolo, role/subagent
+dispatch или acceptance authority. Terminal JSON повторно валидируется по
+`QWEN_RECON_REPORT` schema, а запуск публикует raw-free `QWEN_RECON_GUARD`.
+JSON error envelope не раскрывается: сохраняются только `is_error`,
+allowlisted `subtype` и категория вложенного `error.message`. Поддерживаются
+как terminal `result`, так и top-level envelope; во втором случае raw-free
+projection использует поля `envelope_is_error`, `envelope_subtype`,
+`envelope_error_message_present` и `envelope_error_message_category`.
+
+`QWEN_RECON_READY` означает только schema-valid recon report;
+`QWEN_UNUSABLE` означает malformed или forbidden output, а budget/loop/fingerprint
+добавляют `QWEN_RUNTIME_GUARD_STOP`. Terminal recon ledger закрыт навсегда с
+`RECON_TERMINAL_LEDGER_CLOSED`. Fresh independent recon session разрешена только
+с пустым genesis ledger/`ledger_anchor`, новыми `launch_id`, `session_id`,
+`ledger_id` и registry-проверенным `fresh_evidence_id`; non-empty active ledger
+принимает только exact same receipt, а новый launch получает
+`RECON_ACTIVE_LEDGER_LAUNCH_MISMATCH`. `role_dispatch`, `subagent_dispatch` и
+acceptance всегда false. Existing protocol argv and `QWEN_SESSION_GUARD`
+contract остаются exact и независимыми.
 
 ### QWEN_ASSIST bridge
 
@@ -623,8 +687,9 @@ Scenario fixture обязан композиционно вызвать соот
 
 ## QWEN_PATCH_SEAL
 
-When a bounded `yolo` candidate has the exact terminal reason
-`STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`, Controller may run one
+When a bounded `yolo` candidate has one allowlisted terminal reason
+`STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT` or `COLLECTOR_PROJECTION_FAILED`,
+Controller may run one
 `QWEN_PATCH_SEAL` call before review. Controller first creates a raw-free
 `PATCH_SEAL_RECEIPT` from the observed baseline, bounded diff, one green
 targeted test, empty Git operations and `full_suite: false`. Seal uses Qwen

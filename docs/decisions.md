@@ -624,3 +624,213 @@ fresh receipt. Исчерпание turn/tool/wall budget, streaming-loop detect
 Критерий успеха: в серии из трёх guarded native Qwen sessions нет dispatch без
 receipt и нет continuation после budget/fingerprint stop; измеряются только
 raw-free guard outcome, terminal reason, mode, duration и доступные counters.
+
+## D030 — Capability-based compatibility для guarded launcher
+
+Статус: принято и реализовано 2026-09-20.
+
+Наблюдаемый failure: launcher Ticket 16 и операторский путь были связаны с
+точной версией Qwen, хотя установленный Qwen 0.24.0 предоставляет требуемые
+CLI capabilities. Номер версии сам по себе не доказывает совместимость
+canonical argv и необоснованно блокирует bounded запуск.
+
+Решение: только launcher capability path проверяет наблюдаемые required CLI
+markers и строгий canonical argv contract; version string сохраняется лишь в
+raw-free smoke evidence. Security gates Ticket 16, включая safe-mode,
+loop detection, max depth, extension, receipt и запрет mutations, сохраняются.
+Smoke ограничен `qwen --version` и `qwen --help`, не dispatch'ит role и не
+выполняет acceptance. Qwen role-agent profile и tickets 17--18 не изменяются.
+
+Критерий успеха: установленный Qwen 0.24.0 проходит capability smoke без
+Implementer/acceptance, а launcher блокирует missing capability до ticket work.
+
+## D031 — Lifecycle gate и terminal stop для guarded Qwen session
+
+Статус: принято и реализовано 2026-09-20.
+
+Наблюдаемый failure: raw-free `QWEN_SESSION_GUARD` receipt доказывал стартовые
+limits, но Controller ещё мог продолжить работу после stale/mismatched receipt,
+исчерпания runtime budget, loop или повторного tool fingerprint.
+
+Решение: pure policy gate принимает только fresh compatible receipt и raw-free
+runtime observation. Missing/stale/mismatched evidence возвращает
+`BLOCKED_CAPABILITY` до role dispatch. Budget/loop/fingerprint stop добавляет
+append-only terminal event `QWEN_RUNTIME_GUARD_STOP` без нового role launch.
+Continuation требует нового receipt/launch identity и нового reproducible
+evidence; immutable `ledger_anchor` и `prev_hash`/`event_hash` chain блокируют
+удаление или замену prefix. Gate не запускает Qwen, Implementer или acceptance
+и не меняет acceptance authority.
+
+Критерий успеха: fixtures доказывают fail-closed receipt gate, terminal stop по
+каждому runtime predicate и разрешают только fresh continuation с новым
+evidence; Qwen-owned profile и Ticket 18 не изменяются.
+
+## D032 — Owner-authorized identity для Ticket 18 fixture revalidation
+
+Статус: принято 2026-09-21.
+
+Runtime drift: администратор заменил Qwen model. Для bounded Ticket 18 fixture
+допущена declared identity `qwen38-flash-next` с source
+`USER_AUTHORIZED_CONFIGURATION`; это не является version allow-list и не меняет
+Qwen role profile, settings, provider или sampling.
+
+Ограничение evidence: server-side active identity не получает независимой
+attestation в read-only `--version`/`--help` probe. Controlled pilot обязан
+публиковать это raw-free limitation и не расширяет authority. Provider metadata
+probe или signed attestation остаются отдельным будущим prerequisite.
+
+## D033 — Explicit native read-only recon contract
+
+Статус: принято и реализовано 2026-09-21.
+
+Наблюдаемый failure: guarded launcher принимал только `protocol`, поэтому
+read-only recon нельзя было выразить через проверяемый command/authority
+contract. Снятие `ValidateSet` без новых ограничителей сделало бы fixed
+`/finish-ticket` entry point неявно универсальным и не доказало бы отсутствие
+write, subagent или acceptance действий.
+
+Решение: добавить отдельный `recon` mode с `qwen.cmd`, clean fixed-point
+worktree, `--bare`, `--approval-mode plan`, JSON/schema output, исключёнными
+write/shell/Agent tools, disabled `review,loop` commands и bounded
+`3 turns / 6 tools / 5m / depth 1` (Qwen CLI depth is 1-based; Agent remains
+excluded). Launcher сохраняет raw-free
+`QWEN_RECON_GUARD`; pure lifecycle policy возвращает только
+`QWEN_RECON_READY`, `BLOCKED_CAPABILITY`, `QWEN_UNUSABLE` или
+`QWEN_RUNTIME_GUARD_STOP`, всегда с `role_dispatch=false`,
+`subagent_dispatch=false` и `acceptance=false`. Terminal recon ledger закрыт
+навсегда с `RECON_TERMINAL_LEDGER_CLOSED`; fresh independent recon session
+начинается только с пустого genesis ledger/anchor, новыми launch/session/ledger
+identity и registry-проверенным evidence identity. Active non-empty ledger
+принимает только exact same receipt; новый launch получает
+`RECON_ACTIVE_LEDGER_LAUNCH_MISMATCH`.
+
+Exact protocol argv/receipt contract и Ticket 16 security gates не меняются.
+Recon report является read-only analysis evidence, не role-agent и не
+acceptance evidence. Live Qwen/protocol запуск в Ticket 20 не требуется.
+
+Ticket 21 status: implementation accepted locally with `SPEC: SCOPED_PASS`,
+но не `DONE`; F1 follow-up получил PASS. Полный blocked-contract regression
+для `session_id`/`ledger_id` mismatch и устранение дублированных active
+`launch_id`/`session_id` checks с сохранением reason order закрыты локально.
+Live Ticket 18 pilot не запускается автоматически и требует отдельного
+разрешения; live evidence и acceptance остаются NOT_RUN.
+
+Критерий успеха: focused fixtures доказывают clean-worktree gate,
+capability/schema/read-only enforcement, budget/loop/fingerprint terminal stops
+и byte-equivalent existing protocol command contract; документация и plugin
+lifecycle синхронизированы.
+
+## D034 — Передача validated recon worktree через process cwd
+
+Статус: принято и реализовано локально 2026-09-22; live revalidation закрыта
+D036.
+
+Наблюдаемый failure: live Qwen recon завершался до structured-output terminal
+event с `stdout_present=false`, `stderr_present=true`. Static inspection Qwen
+0.24.3 показала, что `--worktree` принимает slug и создаёт или переиспользует
+только `.qwen/worktrees/<slug>`; launcher передавал путь уже подготовленной
+ProofLoop worktree (`.worktrees\\...`) как slug.
+
+Решение: сохранить отдельную clean fixed-point gate, но запускать Qwen из неё
+через process current directory и убрать `--worktree` из recon argv. Qwen CLI
+требует 1-based `--max-subagent-depth`, поэтому recon передаёт `1`, а запрет
+subagent остаётся enforced через `--exclude-tools Agent`. Capability gate
+проверяет только реально используемые флаги. Это не меняет provider,
+model, settings, sampling, auth или protocol mode.
+
+Измеримый критерий: regression fixture фиксирует cwd равным validated worktree,
+отсутствие `--worktree` в argv и schema-valid read-only terminal report; live
+bounded recon должен перейти из прежнего `QWEN_COMMAND_FAILED` в
+`QWEN_RECON_READY` либо дать новый raw-free terminal reason.
+
+## D035 — Raw-free классификация Qwen JSON error envelope
+
+Статус: принято и реализовано локально 2026-09-22.
+
+Наблюдаемый failure: Qwen возвращал валидный JSON на stdout/stderr и ненулевой
+exit, но launcher видел только общий `QWEN_COMMAND_FAILED`; envelope мог быть
+как терминальным `result`, так и top-level object с `is_error`, `subtype` и
+вложенным `error.message`.
+
+Решение: child bridge извлекает только структурные признаки и allowlist-
+категории (`structured_output_missing`, `auth_or_forbidden`, `transport`,
+`other`), parent сохраняет их в raw-free diagnostic. Текст ошибки, endpoint,
+токен и transcript не публикуются. JSON error-result получает отдельный
+`QWEN_JSON_ERROR_RESULT`, а structured-output marker сохраняет приоритет.
+
+Критерий: fixtures покрывают Qwen-shaped terminal и top-level error envelope,
+а также HTTP 403-подобный случай без утечки raw message; 127 тестов и
+PowerShell parser проходят.
+
+## D036 — Bounded recon: native exit, prompt budget и baseline identity
+
+Статус: принято и реализовано локально 2026-09-22; live recon доказан.
+
+Наблюдаемые failures после D034/D035:
+
+1. Qwen 0.24.3 возвращал schema-valid `type=result` с `is_error=false`,
+   но завершался Windows native exit `-1073740791`; child bridge терял уже
+   полученный report, потому что трактовал любой non-zero как failure.
+2. Длинный запретительный recon prompt провоцировал Qwen исчерпать
+   `max-session-turns`/tool budget (raw-free exit 53/55), хотя capability,
+   schema и API smoke проходили.
+3. Короткий prompt давал `EVIDENCE_FOUND`, но без переданного fixed point
+   модель вернула несовпадающий baseline.
+
+Решение: child принимает native exit только для allowlisted Windows code и
+только при наличии terminal `success` с object `structured_result`; обычные
+non-zero и error envelopes остаются fail-closed. Recon prompt сокращён до
+одной read-only инспекции `README.md` и одного `structured_output`; write,
+shell, Agent и slash-команды по-прежнему блокируются CLI/guard gates. Parent
+передаёт уже проверенный `reconFixedPoint` в child, prompt требует установить
+его без изменения, а parent повторно сверяет baseline.
+
+Измеримый результат: focused runtime-guard suite `15/15`, PowerShell parser
+`ok`; live launch `814298d37ba7487c83c3313b72b1f936` завершился
+`QWEN_RECON_READY` с `EVIDENCE_FOUND`, `structured_output_valid=true`,
+`writes=false`, `role_dispatch=false`, `subagent_dispatch=false`,
+`acceptance=false`, budget `3/6/5m/depth1`, clean fixed point
+`335ba1dc0364e7bb9ac0413925e1a1e8440cb760`. Это recon evidence, не
+Implementer и не acceptance authority.
+
+## D037 — Manifest-only seal после сбоя host-side collector
+
+Статус: принято и реализовано локально 2026-09-22.
+
+Наблюдаемый failure: bounded Qwen implementation изменил только disposable
+test-файл и прошёл targeted test, но post-run collector завершился ошибкой
+нормализации optional/singleton JSON-свойства `.Count`. Из-за этого terminal
+manifest нельзя честно классифицировать как Qwen turn-limit failure, хотя
+independent diff/test evidence сохранилось.
+
+Решение: исправить collector так, чтобы он нормализовал terminal event через
+явный `[object[]]` и принимал только финальный `result` с
+`is_error=false`, `subtype=success` и object `structured_result`. Для одного
+изолированного manifest-only запуска добавить отдельную allowlist-причину
+`COLLECTOR_PROJECTION_FAILED`; она доступна только при independently observed
+bounded diff и green targeted test и не утверждает причину завершения Qwen.
+После live error выяснилось, что Qwen CLI считает structured output tool call;
+поэтому seal использует ровно `--max-tool-calls 1`, а все write/shell/Agent
+tools остаются исключёнными. Seal не получает transfer или acceptance authority.
+
+Критерий: regression tests покрывают singleton/array terminal JSON и
+singleton property collection; новый launch выдаёт только raw-free
+`SEALED_CANDIDATE` или terminal `QWEN_UNUSABLE`.
+
+## D038 — Один structured-output вызов в manifest-only seal
+
+Статус: принято и реализовано локально 2026-09-22.
+
+Наблюдаемый failure: при `2 turns / 0 tools` Qwen завершился
+`FatalTurnLimitedError`, а при `4 turns / 0 tools` вернул JSON envelope
+`structured_output_missing`. Это не transport/auth failure: нулевой tool budget
+запрещал самому Qwen вызвать требуемый structured-output канал.
+
+Решение: manifest-only seal получает `4 turns / 180s / depth1` и ровно один
+tool call, который может быть только structured output; Agent/edit/shell и
+network/MCP остаются недоступны. Любой другой tool call не разрешается
+exclusion/guard contract. Новый packet получает отдельную reservation identity;
+повтор внутри одной seal identity запрещён.
+
+Критерий: live launch должен вернуть terminal schema-valid manifest, после
+чего capture reader и независимый validator выдают `SEALED_CANDIDATE`.

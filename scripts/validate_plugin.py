@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -53,6 +54,18 @@ REQUIRED_CONTRACT_TERMS = (
     "read-only Reviewer",
     "verification command",
     "QWEN_CONVERGENT",
+    "QWEN_SESSION_GUARD",
+    "QWEN_RUNTIME_GUARD_STOP",
+    "QWEN_RECON_GUARD",
+    "QWEN_RECON_READY",
+    "native read-only recon",
+    "clean fixed-point worktree",
+    "fresh compatible",
+    "runtime observation",
+    "terminal event",
+    "ledger_anchor",
+    "prev_hash",
+    "event_hash",
     "append-only ledger",
     "fixed point",
     "sequence: 1",
@@ -113,6 +126,19 @@ QWEN_EXTENSION_SKILLS = "plugins/agentic-development-workflow/skills"
 QWEN_EXTENSION_AGENTS = "qwen-code/agents"
 QWEN_CONTROLLER_AGENT = "finish-ticket-controller.md"
 QWEN_PILOT_EVIDENCE = "docs/experiments/qwen-code-v0222-pilot.md"
+QWEN_RUNTIME_RECEIPT_VERSION = 1
+QWEN_RUNTIME_LIMITS = {
+    "max_session_turns": 20,
+    "max_tool_calls": 20,
+    "max_wall_time": "30m",
+    "max_subagent_depth": 1,
+}
+QWEN_RECON_LIMITS = {
+    "max_session_turns": 3,
+    "max_tool_calls": 6,
+    "max_wall_time": "5m",
+    "max_subagent_depth": 1,
+}
 
 
 def resolve_model_route(
@@ -903,6 +929,597 @@ def contains_forbidden_projection_field(value: object) -> bool:
         return any(contains_forbidden_projection_field(item) for item in value)
     return False
 
+
+def _parse_runtime_utc(value: object) -> datetime | None:
+    if not is_nonempty_string(value):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _runtime_receipt_reason(
+    receipt: object, now_utc: datetime, max_age_seconds: int
+) -> str | None:
+    if receipt is None:
+        return "RECEIPT_MISSING"
+    if not isinstance(receipt, dict) or contains_forbidden_projection_field(receipt):
+        return "RECEIPT_MISMATCHED"
+    if (
+        receipt.get("receipt_type") != "QWEN_SESSION_GUARD"
+        or receipt.get("receipt_version") != QWEN_RUNTIME_RECEIPT_VERSION
+        or not isinstance(receipt.get("launch_id"), str)
+        or re.fullmatch(r"[0-9a-f]{32}", receipt["launch_id"]) is None
+        or receipt.get("mode") != "protocol"
+        or receipt.get("limits") != QWEN_RUNTIME_LIMITS
+        or receipt.get("loop_detection") is not True
+        or receipt.get("extension_available") is not True
+    ):
+        return "RECEIPT_MISMATCHED"
+    issued_at = _parse_runtime_utc(receipt.get("issued_at_utc"))
+    if issued_at is None:
+        return "RECEIPT_MISMATCHED"
+    age_seconds = (now_utc - issued_at).total_seconds()
+    if age_seconds < 0 or age_seconds > max_age_seconds:
+        return "RECEIPT_STALE"
+    return None
+
+
+def _runtime_event_hash(entry: dict[str, object]) -> str:
+    unsigned = {key: value for key, value in entry.items() if key != "event_hash"}
+    canonical = json.dumps(unsigned, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _runtime_append_event(
+    ledger: list[dict[str, object]], event: dict[str, object], ledger_id: str
+) -> dict[str, object]:
+    entry = {
+        "ledger_id": ledger_id,
+        "sequence": len(ledger) + 1,
+        "prev_hash": ledger[-1]["event_hash"] if ledger else "GENESIS",
+        **event,
+    }
+    entry["event_hash"] = _runtime_event_hash(entry)
+    return entry
+
+
+def _runtime_observation_is_valid(entry: dict[str, object]) -> bool:
+    return (
+        all(
+            is_nonempty_string(entry.get(field))
+            for field in ("launch_id", "session_id", "tool_fingerprint")
+        )
+        and re.fullmatch(r"[0-9a-f]{32}", entry["launch_id"]) is not None
+        and isinstance(entry.get("turns"), int)
+        and not isinstance(entry["turns"], bool)
+        and entry["turns"] >= 0
+        and isinstance(entry.get("tool_calls"), int)
+        and not isinstance(entry["tool_calls"], bool)
+        and entry["tool_calls"] >= 0
+        and isinstance(entry.get("wall_time_seconds"), int)
+        and not isinstance(entry["wall_time_seconds"], bool)
+        and entry["wall_time_seconds"] >= 0
+        and isinstance(entry.get("loop_detected"), bool)
+        and entry.get("reproducible_evidence") is True
+        and isinstance(entry.get("continuation"), bool)
+        and (
+            entry["continuation"] is not True
+            or is_nonempty_string(entry.get("fresh_evidence_id"))
+        )
+    )
+
+
+def _runtime_ledger_reason(ledger: object, anchor: object) -> str | None:
+    if not isinstance(ledger, list) or not isinstance(anchor, dict):
+        return "RUNTIME_LEDGER_INVALID"
+    if (
+        not is_nonempty_string(anchor.get("ledger_id"))
+        or not isinstance(anchor.get("sequence"), int)
+        or isinstance(anchor["sequence"], bool)
+        or anchor["sequence"] < 0
+        or not is_nonempty_string(anchor.get("head_hash"))
+    ):
+        return "RUNTIME_LEDGER_INVALID"
+    if len(ledger) != anchor["sequence"]:
+        return "RUNTIME_LEDGER_ANCHOR_MISMATCH"
+    if not ledger:
+        return "RUNTIME_LEDGER_ANCHOR_MISMATCH" if anchor["head_hash"] != "GENESIS" else None
+    state = "ACTIVE"
+    active_launch_id: str | None = None
+    previous_hash = "GENESIS"
+    for sequence, entry in enumerate(ledger, start=1):
+        if not isinstance(entry, dict) or entry.get("sequence") != sequence:
+            return "RUNTIME_LEDGER_INVALID"
+        if (
+            entry.get("ledger_id") != anchor["ledger_id"]
+            or entry.get("prev_hash") != previous_hash
+            or not is_nonempty_string(entry.get("event_hash"))
+            or entry["event_hash"] != _runtime_event_hash(entry)
+        ):
+            return "RUNTIME_LEDGER_INVALID"
+        previous_hash = entry["event_hash"]
+        event = entry.get("event")
+        if event == "runtime_observation":
+            if state != "ACTIVE" or not _runtime_observation_is_valid(entry):
+                return "RUNTIME_LEDGER_INVALID"
+            active_launch_id = entry["launch_id"]
+        elif event == "terminal":
+            if (
+                state != "ACTIVE"
+                or entry.get("status") != "QWEN_RUNTIME_GUARD_STOP"
+                or not is_nonempty_string(entry.get("reason"))
+                or re.fullmatch(r"[0-9a-f]{32}", str(entry.get("launch_id"))) is None
+                or entry.get("launch_id") != active_launch_id
+            ):
+                return "RUNTIME_LEDGER_INVALID"
+            state = "TERMINAL"
+        elif event == "session_start":
+            if (
+                state != "TERMINAL"
+                or re.fullmatch(r"[0-9a-f]{32}", str(entry.get("launch_id"))) is None
+                or not is_nonempty_string(entry.get("fresh_evidence_id"))
+                or entry.get("launch_id") == active_launch_id
+            ):
+                return "RUNTIME_LEDGER_INVALID"
+            active_launch_id = entry["launch_id"]
+            state = "ACTIVE"
+        else:
+            return "RUNTIME_LEDGER_INVALID"
+    if anchor["head_hash"] != previous_hash:
+        return "RUNTIME_LEDGER_ANCHOR_MISMATCH"
+    return None
+
+
+def _runtime_observation_projection(
+    launch_id: str, observation: dict[str, object]
+) -> dict[str, object]:
+    projection = {
+        "event": "runtime_observation",
+        "launch_id": launch_id,
+        "session_id": observation["session_id"],
+        "turns": observation["turns"],
+        "tool_calls": observation["tool_calls"],
+        "wall_time_seconds": observation["wall_time_seconds"],
+        "loop_detected": observation["loop_detected"],
+        "tool_fingerprint": observation["tool_fingerprint"],
+        "reproducible_evidence": observation["reproducible_evidence"],
+        "continuation": observation["continuation"],
+    }
+    if observation.get("continuation") is True:
+        projection["continuation"] = True
+        projection["fresh_evidence_id"] = observation["fresh_evidence_id"]
+    return projection
+
+
+def _runtime_ledger_anchor(ledger: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "ledger_id": ledger[0]["ledger_id"],
+        "sequence": len(ledger),
+        "head_hash": ledger[-1]["event_hash"],
+    }
+
+
+def qwen_runtime_guard_decision(payload: object) -> dict[str, object]:
+    """Evaluate one raw-free guarded-session observation without dispatching anything."""
+    if not isinstance(payload, dict) or payload.get("operation") != "runtime_observation":
+        return {"status": "BLOCKED_CAPABILITY", "reason": "MALFORMED_RUNTIME_EVIDENCE", "role_dispatch": False}
+    if contains_forbidden_projection_field(payload):
+        return {"status": "BLOCKED_CAPABILITY", "reason": "RAW_FIELD_FORBIDDEN", "role_dispatch": False}
+    now_utc = _parse_runtime_utc(payload.get("now_utc"))
+    max_age_seconds = payload.get("max_receipt_age_seconds", 300)
+    if now_utc is None or isinstance(max_age_seconds, bool) or not isinstance(max_age_seconds, int) or not 0 < max_age_seconds <= 3600:
+        return {"status": "BLOCKED_CAPABILITY", "reason": "MALFORMED_RUNTIME_EVIDENCE", "role_dispatch": False}
+    receipt = payload.get("receipt")
+    receipt_reason = _runtime_receipt_reason(receipt, now_utc, max_age_seconds)
+    if receipt_reason is not None:
+        return {"status": "BLOCKED_CAPABILITY", "reason": receipt_reason, "role_dispatch": False}
+    ledger = payload.get("ledger")
+    ledger_anchor = payload.get("ledger_anchor")
+    ledger_reason = _runtime_ledger_reason(ledger, ledger_anchor)
+    if ledger_reason is not None:
+        return {"status": "BLOCKED_CAPABILITY", "reason": ledger_reason, "role_dispatch": False}
+    if not isinstance(ledger, list) or not isinstance(ledger_anchor, dict):
+        return {"status": "BLOCKED_CAPABILITY", "reason": "RUNTIME_LEDGER_INVALID", "role_dispatch": False}
+    if not ledger and ledger_anchor["ledger_id"] != receipt["launch_id"]:
+        return {"status": "BLOCKED_CAPABILITY", "reason": "RUNTIME_LEDGER_ANCHOR_MISMATCH", "role_dispatch": False}
+    observation = payload.get("observation")
+    if not isinstance(observation, dict) or contains_forbidden_projection_field(observation):
+        return {"status": "BLOCKED_CAPABILITY", "reason": "RUNTIME_EVIDENCE_MALFORMED", "role_dispatch": False}
+    required_observation_types = (
+        isinstance(observation.get("session_id"), str) and bool(observation["session_id"].strip()),
+        isinstance(observation.get("turns"), int) and not isinstance(observation["turns"], bool) and observation["turns"] >= 0,
+        isinstance(observation.get("tool_calls"), int) and not isinstance(observation["tool_calls"], bool) and observation["tool_calls"] >= 0,
+        isinstance(observation.get("wall_time_seconds"), int) and not isinstance(observation["wall_time_seconds"], bool) and observation["wall_time_seconds"] >= 0,
+        isinstance(observation.get("loop_detected"), bool),
+        isinstance(observation.get("tool_fingerprint"), str) and bool(observation["tool_fingerprint"].strip()),
+        observation.get("reproducible_evidence") is True,
+        isinstance(observation.get("continuation"), bool),
+    )
+    if not all(required_observation_types):
+        return {"status": "BLOCKED_CAPABILITY", "reason": "RUNTIME_EVIDENCE_MALFORMED", "role_dispatch": False}
+    if observation["continuation"] is True and (
+        not isinstance(observation.get("fresh_evidence_id"), str) or not observation["fresh_evidence_id"].strip()
+    ):
+        return {"status": "BLOCKED_CAPABILITY", "reason": "CONTINUATION_EVIDENCE_MISSING", "role_dispatch": False}
+
+    output_ledger: list[dict[str, object]] = list(ledger)
+    ledger_id = ledger_anchor["ledger_id"]
+    terminal_launches = {
+        entry["launch_id"]
+        for entry in output_ledger
+        if isinstance(entry, dict) and entry.get("event") == "terminal" and isinstance(entry.get("launch_id"), str)
+    }
+    last_event = output_ledger[-1] if output_ledger else None
+    if isinstance(last_event, dict) and last_event.get("event") == "terminal":
+        if receipt["launch_id"] in terminal_launches:
+            return {"status": "BLOCKED_CAPABILITY", "reason": "FRESH_SESSION_REQUIRED", "role_dispatch": False}
+        if not isinstance(last_event, dict) or last_event.get("event") != "terminal" or observation["continuation"] is not True:
+            return {"status": "BLOCKED_CAPABILITY", "reason": "FRESH_SESSION_REQUIRED", "role_dispatch": False}
+        output_ledger.append(
+            _runtime_append_event(
+                output_ledger,
+                {
+                    "event": "session_start",
+                    "launch_id": receipt["launch_id"],
+                    "fresh_evidence_id": observation["fresh_evidence_id"],
+                },
+                ledger_id,
+            )
+        )
+
+    prior_observation = next(
+        (
+            entry
+            for entry in reversed(output_ledger)
+            if isinstance(entry, dict) and entry.get("event") == "runtime_observation"
+        ),
+        None,
+    )
+    repeated_fingerprint = (
+        isinstance(prior_observation, dict)
+        and prior_observation.get("launch_id") == receipt["launch_id"]
+        and prior_observation.get("session_id") == observation["session_id"]
+        and prior_observation.get("tool_fingerprint") == observation["tool_fingerprint"]
+    )
+    output_ledger.append(
+        _runtime_append_event(
+            output_ledger,
+            _runtime_observation_projection(receipt["launch_id"], observation),
+            ledger_id,
+        )
+    )
+    stop_reason = None
+    if observation["loop_detected"] is True:
+        stop_reason = "LOOP_DETECTED"
+    elif observation["turns"] >= QWEN_RUNTIME_LIMITS["max_session_turns"]:
+        stop_reason = "MAX_SESSION_TURNS_EXHAUSTED"
+    elif observation["tool_calls"] >= QWEN_RUNTIME_LIMITS["max_tool_calls"]:
+        stop_reason = "MAX_TOOL_CALLS_EXHAUSTED"
+    elif observation["wall_time_seconds"] >= 1800:
+        stop_reason = "MAX_WALL_TIME_EXHAUSTED"
+    elif repeated_fingerprint:
+        stop_reason = "REPEATED_TOOL_FINGERPRINT"
+    if stop_reason is not None:
+        output_ledger.append(
+            _runtime_append_event(
+                output_ledger,
+                {
+                    "event": "terminal",
+                    "launch_id": receipt["launch_id"],
+                    "status": "QWEN_RUNTIME_GUARD_STOP",
+                    "reason": stop_reason,
+                },
+                ledger_id,
+            )
+        )
+        return {
+            "status": "QWEN_RUNTIME_GUARD_STOP",
+            "reason": stop_reason,
+            "launch_id": receipt["launch_id"],
+            "session_id": observation["session_id"],
+            "role_dispatch": False,
+            "ledger": output_ledger,
+            "ledger_anchor": _runtime_ledger_anchor(output_ledger),
+        }
+    return {
+        "status": "QWEN_RUNTIME_GUARD_READY",
+        "launch_id": receipt["launch_id"],
+        "session_id": observation["session_id"],
+        "role_dispatch": True,
+        "ledger": output_ledger,
+        "ledger_anchor": _runtime_ledger_anchor(output_ledger),
+    }
+
+
+def _recon_receipt_reason(
+    receipt: object, now_utc: datetime, max_age_seconds: int
+) -> str | None:
+    if receipt is None:
+        return "RECEIPT_MISSING"
+    if not isinstance(receipt, dict) or contains_forbidden_projection_field(receipt):
+        return "RECEIPT_MISMATCHED"
+    if (
+        receipt.get("receipt_type") != "QWEN_RECON_GUARD"
+        or receipt.get("receipt_version") != QWEN_RUNTIME_RECEIPT_VERSION
+        or not isinstance(receipt.get("launch_id"), str)
+        or re.fullmatch(r"[0-9a-f]{32}", receipt["launch_id"]) is None
+        or not isinstance(receipt.get("session_id"), str)
+        or re.fullmatch(r"[0-9a-f]{32}", receipt["session_id"]) is None
+        or not isinstance(receipt.get("ledger_id"), str)
+        or re.fullmatch(r"[0-9a-f]{32}", receipt["ledger_id"]) is None
+        or not isinstance(receipt.get("fresh_evidence_id"), str)
+        or re.fullmatch(r"[0-9a-f]{32}", receipt["fresh_evidence_id"]) is None
+        or receipt.get("mode") != "recon"
+        or receipt.get("limits") != QWEN_RECON_LIMITS
+        or receipt.get("loop_detection") is not True
+        or receipt.get("extension_available") is not True
+        or receipt.get("read_only") is not True
+        or receipt.get("role_dispatch") is not False
+        or receipt.get("subagent_dispatch") is not False
+        or receipt.get("acceptance") is not False
+        or receipt.get("structured_output") is not True
+        or receipt.get("worktree_clean") is not True
+        or not isinstance(receipt.get("fixed_point"), str)
+        or re.fullmatch(r"[0-9a-f]{40,64}", receipt["fixed_point"]) is None
+    ):
+        return "RECEIPT_MISMATCHED"
+    issued_at = _parse_runtime_utc(receipt.get("issued_at_utc"))
+    if issued_at is None:
+        return "RECEIPT_MISMATCHED"
+    age_seconds = (now_utc - issued_at).total_seconds()
+    if age_seconds < 0 or age_seconds > max_age_seconds:
+        return "RECEIPT_STALE"
+    return None
+
+
+def _recon_ledger_reason(ledger: object, anchor: object) -> str | None:
+    if not isinstance(ledger, list) or not isinstance(anchor, dict):
+        return "RUNTIME_LEDGER_INVALID"
+    if (
+        not is_nonempty_string(anchor.get("ledger_id"))
+        or not isinstance(anchor.get("sequence"), int)
+        or isinstance(anchor["sequence"], bool)
+        or anchor["sequence"] < 0
+        or not is_nonempty_string(anchor.get("head_hash"))
+    ):
+        return "RUNTIME_LEDGER_INVALID"
+    if len(ledger) != anchor["sequence"]:
+        return "RUNTIME_LEDGER_ANCHOR_MISMATCH"
+    if not ledger:
+        return "RUNTIME_LEDGER_ANCHOR_MISMATCH" if anchor["head_hash"] != "GENESIS" else None
+    state = "ACTIVE"
+    identity: tuple[str, str, str, str] | None = None
+    previous_hash = "GENESIS"
+    for sequence, entry in enumerate(ledger, start=1):
+        if not isinstance(entry, dict) or entry.get("sequence") != sequence:
+            return "RUNTIME_LEDGER_INVALID"
+        if (
+            entry.get("ledger_id") != anchor["ledger_id"]
+            or entry.get("prev_hash") != previous_hash
+            or not is_nonempty_string(entry.get("event_hash"))
+            or entry["event_hash"] != _runtime_event_hash(entry)
+        ):
+            return "RUNTIME_LEDGER_INVALID"
+        previous_hash = entry["event_hash"]
+        event = entry.get("event")
+        if event == "recon_observation":
+            if state != "ACTIVE" or not _recon_observation_is_valid(entry):
+                return "RUNTIME_LEDGER_INVALID"
+            event_identity = (
+                entry["launch_id"], entry["session_id"], entry["ledger_id"], entry["fresh_evidence_id"]
+            )
+            if identity is None:
+                identity = event_identity
+            elif event_identity != identity:
+                return "RUNTIME_LEDGER_INVALID"
+        elif event == "terminal":
+            if (
+                state != "ACTIVE"
+                or entry.get("status") != "QWEN_RUNTIME_GUARD_STOP"
+                or not is_nonempty_string(entry.get("reason"))
+                or re.fullmatch(r"[0-9a-f]{32}", str(entry.get("launch_id"))) is None
+                or identity is None
+                or entry.get("launch_id") != identity[0]
+            ):
+                return "RUNTIME_LEDGER_INVALID"
+            state = "TERMINAL"
+        else:
+            return "RUNTIME_LEDGER_INVALID"
+    if anchor["head_hash"] != previous_hash:
+        return "RUNTIME_LEDGER_ANCHOR_MISMATCH"
+    return None
+
+
+def _recon_observation_is_valid(entry: dict[str, object]) -> bool:
+    return (
+        set(entry) == {
+            "event", "launch_id", "session_id", "ledger_id", "fresh_evidence_id", "turns",
+            "tool_calls", "wall_time_seconds", "loop_detected", "tool_fingerprint",
+            "reproducible_evidence", "structured_output_valid", "writes", "implementation",
+            "role_dispatch", "subagent_dispatch", "acceptance", "sequence", "prev_hash", "event_hash",
+        }
+        and all(is_nonempty_string(entry.get(field)) for field in ("launch_id", "session_id", "ledger_id", "fresh_evidence_id", "tool_fingerprint"))
+        and re.fullmatch(r"[0-9a-f]{32}", entry["launch_id"]) is not None
+        and re.fullmatch(r"[0-9a-f]{32}", entry["session_id"]) is not None
+        and re.fullmatch(r"[0-9a-f]{32}", entry["ledger_id"]) is not None
+        and re.fullmatch(r"[0-9a-f]{32}", entry["fresh_evidence_id"]) is not None
+        and isinstance(entry.get("turns"), int)
+        and not isinstance(entry["turns"], bool)
+        and entry["turns"] >= 0
+        and isinstance(entry.get("tool_calls"), int)
+        and not isinstance(entry["tool_calls"], bool)
+        and entry["tool_calls"] >= 0
+        and isinstance(entry.get("wall_time_seconds"), int)
+        and not isinstance(entry["wall_time_seconds"], bool)
+        and entry["wall_time_seconds"] >= 0
+        and isinstance(entry.get("loop_detected"), bool)
+        and entry.get("reproducible_evidence") is True
+        and entry.get("structured_output_valid") is True
+        and entry.get("writes") is False
+        and entry.get("implementation") is False
+        and entry.get("role_dispatch") is False
+        and entry.get("subagent_dispatch") is False
+        and entry.get("acceptance") is False
+    )
+
+
+def _recon_observation_projection(
+    receipt: dict[str, object], observation: dict[str, object]
+) -> dict[str, object]:
+    projection: dict[str, object] = {
+        "event": "recon_observation",
+        "launch_id": receipt["launch_id"],
+        "session_id": observation["session_id"],
+        "ledger_id": receipt["ledger_id"],
+        "fresh_evidence_id": receipt["fresh_evidence_id"],
+        "turns": observation["turns"],
+        "tool_calls": observation["tool_calls"],
+        "wall_time_seconds": observation["wall_time_seconds"],
+        "loop_detected": observation["loop_detected"],
+        "tool_fingerprint": observation["tool_fingerprint"],
+        "reproducible_evidence": observation["reproducible_evidence"],
+        "structured_output_valid": observation["structured_output_valid"],
+        "writes": observation["writes"],
+        "implementation": observation["implementation"],
+        "role_dispatch": observation["role_dispatch"],
+        "subagent_dispatch": observation["subagent_dispatch"],
+        "acceptance": observation["acceptance"],
+    }
+
+    return projection
+
+
+def _recon_decision(status: str, reason: str, **extra: object) -> dict[str, object]:
+    result: dict[str, object] = {
+        "status": status,
+        "reason": reason,
+        "role_dispatch": False,
+        "subagent_dispatch": False,
+        "acceptance": False,
+    }
+    result.update(extra)
+    return result
+
+
+def qwen_recon_guard_decision(payload: object) -> dict[str, object]:
+    """Evaluate a bounded native read-only recon without dispatching anything."""
+    if not isinstance(payload, dict) or payload.get("operation") != "recon_observation":
+        return _recon_decision("BLOCKED_CAPABILITY", "MALFORMED_RECON_EVIDENCE")
+    if contains_forbidden_projection_field(payload):
+        return _recon_decision("BLOCKED_CAPABILITY", "RAW_FIELD_FORBIDDEN")
+    now_utc = _parse_runtime_utc(payload.get("now_utc"))
+    max_age_seconds = payload.get("max_receipt_age_seconds", 300)
+    if now_utc is None or isinstance(max_age_seconds, bool) or not isinstance(max_age_seconds, int) or not 0 < max_age_seconds <= 3600:
+        return _recon_decision("BLOCKED_CAPABILITY", "MALFORMED_RECON_EVIDENCE")
+    receipt = payload.get("receipt")
+    receipt_reason = _recon_receipt_reason(receipt, now_utc, max_age_seconds)
+    if receipt_reason is not None:
+        return _recon_decision("BLOCKED_CAPABILITY", receipt_reason)
+    ledger = payload.get("ledger")
+    ledger_anchor = payload.get("ledger_anchor")
+    ledger_reason = _recon_ledger_reason(ledger, ledger_anchor)
+    if ledger_reason is not None:
+        return _recon_decision("BLOCKED_CAPABILITY", ledger_reason)
+    if not isinstance(ledger, list) or not isinstance(ledger_anchor, dict):
+        return _recon_decision("BLOCKED_CAPABILITY", "RUNTIME_LEDGER_INVALID")
+    observation = payload.get("observation")
+    if not isinstance(observation, dict) or contains_forbidden_projection_field(observation):
+        return _recon_decision("BLOCKED_CAPABILITY", "RUNTIME_EVIDENCE_MALFORMED")
+    output_ledger: list[dict[str, object]] = list(ledger)
+    ledger_id = ledger_anchor["ledger_id"]
+    last_event = output_ledger[-1] if output_ledger else None
+    if isinstance(last_event, dict) and last_event.get("event") == "terminal":
+        return _recon_decision("BLOCKED_CAPABILITY", "RECON_TERMINAL_LEDGER_CLOSED")
+    prior_observation = next(
+        (entry for entry in reversed(output_ledger) if isinstance(entry, dict) and entry.get("event") == "recon_observation"),
+        None,
+    )
+    if isinstance(prior_observation, dict):
+        if prior_observation.get("launch_id") != receipt["launch_id"]:
+            return _recon_decision("BLOCKED_CAPABILITY", "RECON_ACTIVE_LEDGER_LAUNCH_MISMATCH")
+        if prior_observation.get("session_id") != receipt["session_id"]:
+            return _recon_decision("BLOCKED_CAPABILITY", "RECON_ACTIVE_LEDGER_SESSION_MISMATCH")
+    if ledger_id != receipt["ledger_id"]:
+        return _recon_decision(
+            "BLOCKED_CAPABILITY",
+            "RECON_RECEIPT_LEDGER_MISMATCH" if output_ledger else "RECON_ANCHOR_MISMATCH",
+        )
+    required_observation_fields = {
+        "session_id", "turns", "tool_calls", "wall_time_seconds", "loop_detected", "tool_fingerprint",
+        "reproducible_evidence", "structured_output_valid", "writes", "implementation", "role_dispatch",
+        "subagent_dispatch", "acceptance",
+    }
+    if set(observation) != required_observation_fields or observation.get("session_id") != receipt["session_id"]:
+        return _recon_decision("BLOCKED_CAPABILITY", "RUNTIME_EVIDENCE_MALFORMED")
+    if not _recon_observation_is_valid({
+        **observation,
+        "event": "recon_observation",
+        "launch_id": receipt["launch_id"],
+        "ledger_id": receipt["ledger_id"],
+        "fresh_evidence_id": receipt["fresh_evidence_id"],
+        "sequence": 1,
+        "prev_hash": "GENESIS",
+        "event_hash": "placeholder",
+    }):
+        for field, reason in (
+            ("writes", "RECON_WRITE_VIOLATION"),
+            ("implementation", "RECON_IMPLEMENTATION_VIOLATION"),
+            ("subagent_dispatch", "RECON_SUBAGENT_VIOLATION"),
+            ("acceptance", "RECON_ACCEPTANCE_VIOLATION"),
+            ("structured_output_valid", "STRUCTURED_OUTPUT_INVALID"),
+        ):
+            invalid = (
+                observation.get(field) is not True
+                if field == "structured_output_valid"
+                else observation.get(field) is not False
+            )
+            if invalid:
+                return _recon_decision("QWEN_UNUSABLE", reason)
+        return _recon_decision("BLOCKED_CAPABILITY", "RUNTIME_EVIDENCE_MALFORMED")
+
+    used_fresh_evidence_ids = payload.get("used_fresh_evidence_ids")
+    if not output_ledger:
+        if (
+            not isinstance(used_fresh_evidence_ids, list)
+            or any(not isinstance(identity, str) or re.fullmatch(r"[0-9a-f]{32}", identity) is None for identity in used_fresh_evidence_ids)
+        ):
+            return _recon_decision("BLOCKED_CAPABILITY", "RECON_EVIDENCE_REGISTRY_UNAVAILABLE")
+        if receipt["fresh_evidence_id"] in used_fresh_evidence_ids:
+            return _recon_decision("BLOCKED_CAPABILITY", "RECON_FRESH_EVIDENCE_REUSED")
+    elif isinstance(prior_observation, dict):
+        if (
+            prior_observation.get("ledger_id") != receipt["ledger_id"]
+            or prior_observation.get("fresh_evidence_id") != receipt["fresh_evidence_id"]
+        ):
+            return _recon_decision("BLOCKED_CAPABILITY", "RECON_RECEIPT_LEDGER_MISMATCH")
+    repeated_fingerprint = (
+        isinstance(prior_observation, dict)
+        and prior_observation.get("launch_id") == receipt["launch_id"]
+        and prior_observation.get("session_id") == observation["session_id"]
+        and prior_observation.get("tool_fingerprint") == observation["tool_fingerprint"]
+    )
+    output_ledger.append(_runtime_append_event(output_ledger, _recon_observation_projection(receipt, observation), ledger_id))
+    stop_reason = None
+    if observation["loop_detected"] is True:
+        stop_reason = "LOOP_DETECTED"
+    elif observation["turns"] >= QWEN_RECON_LIMITS["max_session_turns"]:
+        stop_reason = "MAX_SESSION_TURNS_EXHAUSTED"
+    elif observation["tool_calls"] >= QWEN_RECON_LIMITS["max_tool_calls"]:
+        stop_reason = "MAX_TOOL_CALLS_EXHAUSTED"
+    elif observation["wall_time_seconds"] >= 300:
+        stop_reason = "MAX_WALL_TIME_EXHAUSTED"
+    elif repeated_fingerprint:
+        stop_reason = "REPEATED_TOOL_FINGERPRINT"
+    if stop_reason is not None:
+        output_ledger.append(_runtime_append_event(output_ledger, {"event": "terminal", "launch_id": receipt["launch_id"], "status": "QWEN_RUNTIME_GUARD_STOP", "reason": stop_reason}, ledger_id))
+        return _recon_decision("QWEN_RUNTIME_GUARD_STOP", stop_reason, launch_id=receipt["launch_id"], session_id=observation["session_id"], ledger=output_ledger, ledger_anchor=_runtime_ledger_anchor(output_ledger))
+    return {"status": "QWEN_RECON_READY", "launch_id": receipt["launch_id"], "session_id": observation["session_id"], "role_dispatch": False, "subagent_dispatch": False, "acceptance": False, "ledger": output_ledger, "ledger_anchor": _runtime_ledger_anchor(output_ledger)}
+
 def pass_projection_decision(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict): return {"status":"PASS_PROJECTION_BLOCKED","reason":"MALFORMED_PASS_PROJECTION"}
     if contains_forbidden_projection_field(payload): return {"status":"PASS_PROJECTION_BLOCKED","reason":"RAW_FIELD_FORBIDDEN"}
@@ -1329,6 +1946,8 @@ def main() -> None:
     parser.add_argument("--semantic-diff", type=json.loads)
     parser.add_argument("--pass-projection", type=json.loads)
     parser.add_argument("--scenario-fixture", type=json.loads)
+    parser.add_argument("--qwen-runtime-guard", type=json.loads)
+    parser.add_argument("--qwen-recon-guard", type=json.loads)
     parser.add_argument("--qwen-extension-root", type=Path)
     args = parser.parse_args()
     if args.diagnostic_cycle is not None:
@@ -1336,6 +1955,12 @@ def main() -> None:
         return
     if args.scenario_fixture is not None:
         print(json.dumps(scenario_fixture_decision(args.scenario_fixture), sort_keys=True))
+        return
+    if args.qwen_runtime_guard is not None:
+        print(json.dumps(qwen_runtime_guard_decision(args.qwen_runtime_guard), sort_keys=True))
+        return
+    if args.qwen_recon_guard is not None:
+        print(json.dumps(qwen_recon_guard_decision(args.qwen_recon_guard), sort_keys=True))
         return
     if args.pass_projection is not None:
         print(json.dumps(pass_projection_decision(args.pass_projection), sort_keys=True))

@@ -83,7 +83,10 @@ manifest is recorded as `QWEN_UNUSABLE` for the write-output contract and does n
 ## QWEN_PATCH_SEAL
 
 `QWEN_PATCH_SEAL` is a one-call read-only `plan` stage after the exact yolo
-reason `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`. Controller supplies a
+reason `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT` or the host-side collector
+reason `COLLECTOR_PROJECTION_FAILED`. The latter is allowed only when the
+bounded diff and green targeted test were independently observed; it does not
+reclassify Qwen's terminal result. Controller supplies a
 raw-free `PATCH_SEAL_RECEIPT` with independently observed bounded scope and one
 green targeted test; it does not synthesize the manifest. Only Qwen's exact
 patch-schema result becomes `SEALED_CANDIDATE`. Missing or mismatched output is

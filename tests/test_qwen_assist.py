@@ -101,6 +101,11 @@ class QwenAssistTest(unittest.TestCase):
         self.assertIn("$effectiveApprovalMode = if ($ApprovalMode -eq 'seal') { 'plan' } else { $ApprovalMode }", wrapper)
         self.assertIn("--validate-patch-seal-receipt", wrapper)
         self.assertIn("'Agent,edit,notebook_edit,run_shell_command'", wrapper)
+        self.assertIn("$maxToolCalls = if ($ApprovalMode -eq 'seal') { '1' } else { '20' }", wrapper)
+        self.assertIn("$maxSessionTurns = if ($ApprovalMode -eq 'seal') { '12' } else { '12' }", wrapper)
+        self.assertIn("$maxWallTime = if ($ApprovalMode -eq 'seal') { '300s' } else { '10m' }", wrapper)
+        self.assertIn("Call structured_output exactly once", wrapper)
+        self.assertIn("Do not inspect or edit code, use shell/network, or create subagents.", wrapper)
 
     def test_recon_runner_builds_read_only_bounded_command_and_rejects_bad_output(self) -> None:
         runner = Mock(return_value=(0, json.dumps(self.recon_report()), ""))
@@ -340,6 +345,15 @@ class QwenAssistTest(unittest.TestCase):
                 QWEN_ASSIST.validate_patch_seal_receipt(receipt),
                 {"status": "QWEN_UNUSABLE", "reason": reason},
             )
+
+    def test_patch_seal_accepts_controller_collector_failure_reason(self) -> None:
+        receipt = self.patch_seal_receipt()
+        receipt["yolo_reason"] = "COLLECTOR_PROJECTION_FAILED"
+
+        self.assertEqual(
+            QWEN_ASSIST.validate_patch_seal_receipt(receipt),
+            {"status": "PATCH_SEAL_RECEIPT_READY"},
+        )
 
     def test_patch_seal_rejects_manifest_that_differs_from_observed_receipt(self) -> None:
         receipt = self.patch_seal_receipt()

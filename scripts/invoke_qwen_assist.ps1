@@ -98,8 +98,11 @@ if ($AuthType) {
     $authArgs = @('--auth-type', $AuthType)
 }
 $effectiveApprovalMode = if ($ApprovalMode -eq 'seal') { 'plan' } else { $ApprovalMode }
-$effectivePrompt = if ($ApprovalMode -eq 'seal') { "$Prompt`nPATCH_SEAL_RECEIPT:`n$patchSealReceipt`nReturn only the patch manifest for this receipt." } else { $Prompt }
+$effectivePrompt = if ($ApprovalMode -eq 'seal') { "$Prompt`nPATCH_SEAL_RECEIPT:`n$patchSealReceipt`nCall structured_output exactly once with the manifest matching the patch schema. Do not inspect or edit code, use shell/network, or create subagents." } else { $Prompt }
 $excludedTools = if ($effectiveApprovalMode -eq 'plan') { 'Agent,edit,notebook_edit,run_shell_command' } else { 'Agent,run_shell_command' }
+$maxSessionTurns = if ($ApprovalMode -eq 'seal') { '12' } else { '12' }
+$maxWallTime = if ($ApprovalMode -eq 'seal') { '300s' } else { '10m' }
+$maxToolCalls = if ($ApprovalMode -eq 'seal') { '1' } else { '20' }
 
 . "$PSScriptRoot\qwen_credential.ps1"
 $previousApiKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY', 'Process')
@@ -122,9 +125,9 @@ try {
         '--json-schema' "@$SchemaPath" `
         '--worktree' $Worktree `
         '--bare' `
-        '--max-session-turns' '12' `
-        '--max-wall-time' '10m' `
-        '--max-tool-calls' '20' `
+        '--max-session-turns' $maxSessionTurns `
+        '--max-wall-time' $maxWallTime `
+        '--max-tool-calls' $maxToolCalls `
         '--max-subagent-depth' '1' `
         '--exclude-tools' $excludedTools `
         '--disabled-slash-commands' 'review,loop' `

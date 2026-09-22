@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make Qwen the bounded patch Implementer and prove one disposable end-to-end candidate-to-review path with a tool-free manifest-only completion call.
+**Goal:** Make Qwen the bounded patch Implementer and prove one disposable end-to-end candidate-to-review path with a manifest-only completion call that permits exactly one structured-output tool call.
 
-**Architecture:** Local `seal` remains the public wrapper mode, but its effective Qwen behavior becomes `QWEN_MANIFEST_ONLY`: it receives only a raw-free receipt, uses `plan` with no tools, and returns the existing patch schema. Controller observes diff/test facts independently; the capture reader alone issues `SEALED_CANDIDATE` after exact validation.
+**Architecture:** Local `seal` remains the public wrapper mode, but its effective Qwen behavior becomes `QWEN_MANIFEST_ONLY`: it receives only a raw-free receipt, uses `plan` with the single structured-output tool, and returns the existing patch schema. Controller observes diff/test facts independently; the capture reader alone issues `SEALED_CANDIDATE` after exact validation.
 
 **Tech Stack:** Python 3 standard library and `unittest`; PowerShell 7; Qwen CLI; JSON Schema; Markdown.
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Qwen is the bounded Implementer only in an isolated candidate worktree; it has no acceptance, transfer, Git, full-suite, network/MCP or subagent authority.
-- `seal` maps to Qwen `plan`, uses `--bare`, never `--safe-mode`, and has `--max-tool-calls 0`.
+- `seal` maps to Qwen `plan`, uses `--bare`, never `--safe-mode`, and has `--max-tool-calls 1` for structured output only.
 - Receipt baseline equals confirmed recon and current baseline; ticket reservation allows exactly one seal attempt.
 - Missing, malformed or mismatching terminal output is `QWEN_UNUSABLE`, with no automatic retry or fallback.
 - Live proof is one disposable test-only patch, never Ticket 314 implementation or acceptance.
@@ -93,7 +93,7 @@ git commit -m "Define Qwen manifest-only packet"
 
 **Interfaces:**
 - Consumes local `ApprovalMode = seal`, receipt, ticket, recon report and baseline.
-- Produces `plan`, patch schema, `--max-tool-calls 0`, `--bare` and read-only exclusions; `plan` and `yolo` retain `20`.
+- Produces `plan`, patch schema, `--max-tool-calls 1`, `--bare` and read-only exclusions; `plan` and `yolo` retain `20`.
 - Adds CLI action `--build-manifest-only-prompt` requiring `--prompt` and `--patch-seal-receipt`.
 
 - [ ] **Step 1: Write failing static tests.**
@@ -213,7 +213,7 @@ def test_manifest_only_documentation_contract(self) -> None:
     for document in (CANONICAL_LIFECYCLE, QWEN_REFERENCE, HUMAN_LIFECYCLE):
         content = document.read_text(encoding="utf-8")
         self.assertIn("QWEN_MANIFEST_ONLY", content)
-        self.assertIn("--max-tool-calls 0", content)
+        self.assertIn("--max-tool-calls 1", content)
         self.assertIn("no retry", content.lower())
 ```
 
@@ -225,7 +225,7 @@ Expected: FAIL because protocol names only `QWEN_PATCH_SEAL`.
 
 - [ ] **Step 3: Update protocol and D028.**
 
-Document observed seal agent-turn waste, tool-free manifest-only decision,
+Document observed seal agent-turn waste, single-structured-output manifest-only decision,
 exact terminal-match/no-retry/no-transfer rule, and the disposable evidence
 criterion. Do not alter acceptance authority.
 
@@ -238,7 +238,10 @@ Run the Step 2 command; expected PASS.
 1. Create a clean `qwen-patch-manifest-only-<date>` disposable worktree; verify baseline and Credential Manager availability without printing its secret.
 2. Run one schema-valid recon and one Qwen yolo test-only patch attempt.
 3. Independently observe scope and run one targeted command.
-4. If yolo has no manifest only for `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`, create local receipt and run exactly one tool-free seal. Do not retry yolo or seal.
+4. If yolo has no manifest, create a local receipt only for an allowlisted
+   reason: `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT` or the explicitly
+   diagnosed host-side `COLLECTOR_PROJECTION_FAILED`. Run exactly one
+   single-structured-output seal. Do not retry within one seal identity.
 5. Poll capture reader. Only `SEALED_CANDIDATE` opens one fresh read-only review of fixture scope; otherwise record terminal `QWEN_UNUSABLE`.
 6. Delete only the named disposable worktree/branch; retain captures only in AppData.
 

@@ -166,7 +166,71 @@ skill.
 Server-side sampling defaults устраняют языковые артефакты, но не доказывают,
 что native Qwen применит required skill или прекратит повторные tool calls.
 Текущий `QWEN_CONVERGENT` ledger останавливает non-progress между
-repair-candidates, но не ограничивает сам процесс Qwen до watchdog. Принятая
-доработка вводит отдельный ProofLoop-owned guarded launcher, raw-free receipt
-и технические limits; до реализации это целевое состояние, а не действующий
-capability gate.
+repair-candidates, но не ограничивает сам процесс Qwen до watchdog. Ticket 16
+ввёл отдельный ProofLoop-owned guarded launcher, raw-free receipt и технические
+limits; Ticket 19 заменил version pin launcher capability path на capability и
+CLI compatibility checks. Ticket 17 добавил pure raw-free lifecycle gate для
+fresh receipt, terminal budget/loop/fingerprint stop и append-only continuation
+evidence; он не запускает role-agent или acceptance. Режимы Ticket 18 остаются
+отдельной незапущенной задачей; live role/acceptance evidence нет.
+Административная замена Qwen model считается runtime drift и prerequisite для
+Ticket 18. Для controlled fixture owner-authorized declaration фиксирует
+`configured_model_id: qwen38-flash-next`, source
+`USER_AUTHORIZED_CONFIGURATION`; server-side active identity остаётся
+неattested limitation. Текущие Ticket 17 gates не ослабляются.
+
+## Наблюдаемый failure mode 14: recon не имел отдельной executable boundary
+
+Design-only разбор Ticket 20 установил, что guarded launcher принимал только
+`protocol`: его `ValidateSet`, child CLI contract и fixed `/finish-ticket`
+prompt не позволяли безопасно выразить read-only recon. Простое снятие
+ограничения расширило бы authority без доказуемых write/subagent/structured
+output gates. Ticket 20 добавляет отдельный native `recon` contract с clean
+fixed-point worktree, `--bare`, plan-mode tool exclusions, bounded limits,
+schema-validated JSON, raw-free `QWEN_RECON_GUARD` и terminal stops; existing
+protocol remains exact. Recon result is never role or acceptance evidence.
+
+## Статус Ticket 21
+
+Ticket 21 реализован локально, F1 follow-up получил `PASS`, а fresh review
+не нашёл P0–P3 в F1 scope. Ticket сохраняет `SPEC: SCOPED_PASS` и не является
+`DONE`: protocol и acceptance live не запускались. F1-1 закрепляет
+полный blocked-contract regression для `session_id`/`ledger_id` mismatch:
+`status=BLOCKED_CAPABILITY`, три authority markers false и отсутствие ledger
+append. F1-2 удаляет дублированные active `launch_id`/`session_id` checks с
+сохранением reason order.
+
+2026-09-22 диагностика live recon завершена. Первые bounded прогоны выявили
+три отдельные причины: native exit `-1073740791` после валидного terminal
+result, перегруженный prompt с исчерпанием Qwen turn/tool budget и отсутствие
+явного fixed-point в prompt (`BASELINE_MISMATCH`). Bridge теперь принимает
+только allowlisted native exit вместе с schema-valid success result; prompt
+сведён к одной read-only инспекции и одному structured output; parent передаёт
+и повторно проверяет baseline.
+
+Новый bounded live launch
+`814298d37ba7487c83c3313b72b1f936` завершился `QWEN_RECON_READY` с
+`EVIDENCE_FOUND`, `structured_output_valid=true`, `writes=false`,
+`role_dispatch=false`, `subagent_dispatch=false`, `acceptance=false`; budget
+`3/6/5m/depth1`, clean fixed point
+`335ba1dc0364e7bb9ac0413925e1a1e8440cb760`. Это доказательство native
+read-only recon path, но не Implementer и не acceptance evidence. Текущий
+рабочий diff остаётся без commit.
+
+2026-09-22 manifest-only seal после bounded test-only candidate также получил
+terminal outcome без retry. Collector исправлен для singleton/array terminal
+JSON, singleton `.Count` и пустого stdout; launch
+`7dd8ce112bcc4b909393af741c49e8ad` имел budget `2/0/90s/depth1`, но вернул
+`exit_code=53`, `stdout_present=false`, `stderr_present=true`,
+`structured_result=false`. Исправленный collector классифицировал это как
+`QWEN_UNUSABLE / MISSING_TERMINAL_PATCH_MANIFEST`; `SEALED_CANDIDATE` не
+создан. Изменённая allowlist-причина `COLLECTOR_PROJECTION_FAILED` не
+подменяет фактический terminal outcome Qwen и не даёт transfer или acceptance.
+
+После диагностики выполнены ещё три fresh bounded packet с изменённым scope:
+`4/0/180s` дал structured JSON error envelope,
+`4/1/180s` с explicit `structured_output` дал тот же structured-output
+failure, а `12/1/300s` снова завершился `FatalTurnLimitedError` с пустым
+stdout. Auth/transport не были причиной. Поэтому E2E `SEALED_CANDIDATE` не
+доказан; дальнейший blind retry остановлен как внешний Qwen CLI/provider
+limitation. Collector и локальные gates исправлены и проверены.

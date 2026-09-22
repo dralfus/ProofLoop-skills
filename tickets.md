@@ -257,6 +257,23 @@ bounded unsealed yolo diff and green targeted test, but its one read-only
 for the seal output contract. See
 `docs/experiments/qwen-assist-patch-seal-smoke-2026-09-19.md`.
 
+## Update: collector-repaired manifest-only seal (2026-09-22)
+
+Collector normalizes singleton/array terminal JSON, rejects non-success final
+events and classifies empty stdout as `MISSING_TERMINAL_PATCH_MANIFEST`.
+Disposable candidate `qwen-patch-ticket-314` retained one test-only file with
+17 added lines and a green focused test. One changed-scope seal launch
+(`2 turns / 0 tools / 90s / depth1`) ended `QWEN_UNUSABLE` with raw-free
+`exit_code=53`, `stdout_present=false`, `stderr_present=true` and no terminal
+manifest. No retry, transfer or acceptance followed; see
+`docs/experiments/qwen-manifest-only-collector-failure-2026-09-22.md`.
+
+Follow-up diagnostics used fresh bounded packets `4/0/180s`, `4/1/180s` with
+explicit `structured_output`, and `12/1/300s`; all ended without a terminal
+patch manifest (`structured_output_missing` or `FatalTurnLimitedError`). This
+is now classified as an external Qwen CLI/provider limitation. E2E
+`SEALED_CANDIDATE` remains NOT PROVEN; no further blind retry was made.
+
 ## 15. Условный `MINIMAL_SOLUTION_CHECK` для ordinary non-Qwen ticket
 
 **Status:** implemented, local validation pending.
@@ -274,13 +291,13 @@ receipt без изменения пользовательских настро�
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent.
+**Status:** implemented, local validation complete.
 
-- [ ] Launcher блокирует safe-mode, disabled loop detection, nesting глубже
+- [x] Launcher блокирует safe-mode, disabled loop detection, nesting глубже
   одного уровня и отсутствующий ProofLoop extension до ticket work.
-- [ ] Launcher не выводит secret и не изменяет `qwen.cmd`, user settings,
+- [x] Launcher не выводит secret и не изменяет `qwen.cmd`, user settings,
   endpoint, model или API key.
-- [ ] Launcher создаёт локальный raw-free `QWEN_SESSION_GUARD` receipt с
+- [x] Launcher создаёт локальный raw-free `QWEN_SESSION_GUARD` receipt с
   launch identity, mode и effective limits.
 
 ## 17. Lifecycle gate и terminal stop guarded Qwen session
@@ -291,14 +308,15 @@ runtime loop без автоматического continuation.
 
 **Blocked by:** 16. Guarded launcher native Qwen Code.
 
-**Status:** ready-for-agent.
+**Status:** implemented, local validation complete.
 
-- [ ] Missing, stale или несовместимый receipt возвращает
+- [x] Missing, stale или несовместимый receipt возвращает
   `BLOCKED_CAPABILITY` до role dispatch.
-- [ ] Budget exhaustion, loop detection или повтор tool fingerprint дают
+- [x] Budget exhaustion, loop detection или повтор tool fingerprint дают
   `QWEN_RUNTIME_GUARD_STOP` без нового role launch.
-- [ ] Fresh continuation требует нового reproducible evidence и сохраняет
-  append-only QWEN ledger; acceptance authority не меняется.
+- [x] Fresh continuation требует нового reproducible evidence и сохраняет
+  append-only QWEN ledger с immutable anchor/hash chain; acceptance authority не
+  меняется.
 
 ## 18. Режимы Qwen и controlled pilot guard
 
@@ -316,3 +334,106 @@ runtime loop без автоматического continuation.
   не становится version allow-list.
 - [ ] Fixtures и pilot публикуют raw-free guard outcome, terminal reason,
   duration, mode и доступные turn/tool counters.
+
+## 19. Capability-based Qwen launcher compatibility
+
+**Что реализовать:** Убрать exact-version gate из launcher capability path
+Ticket 16 и принимать установленный Qwen по наблюдаемым обязательным CLI
+capabilities и canonical argv compatibility. Добавить bounded read-only smoke
+для установленного Qwen 0.24.0 без role dispatch и acceptance.
+
+**Blocked by:** 16. Guarded launcher native Qwen Code.
+
+**Status:** implemented, local validation complete.
+
+- [x] Launcher проверяет required CLI capabilities и compatibility contract,
+  не используя version string как allow-list.
+- [x] Все security gates Ticket 16 сохранены: safe-mode, loop detection,
+  max depth, extension, raw-free receipt и запрет mutations.
+- [x] Smoke выполняет только `qwen --version` и `qwen --help`, публикует
+  raw-free version/capability evidence и не запускает Implementer или acceptance.
+
+## 20. Native read-only Qwen recon mode
+
+**Что реализовать:** Добавить в guarded native-Qwen launcher отдельный explicit
+`recon` mode для ограниченного анализа в clean fixed-point worktree. Режим не
+является `protocol`, не запускает role-agent или acceptance и не получает
+write-capable tool classes.
+
+**Blocked by:** 16. Guarded launcher native Qwen Code; 17. Lifecycle gate и
+terminal stop guarded Qwen session.
+
+**Status:** implementation and local validation complete; bounded live recon
+proof passed 2026-09-22 after separately diagnosed bridge, prompt-budget and
+baseline-identity failures. No protocol/Implementer/acceptance run was made.
+
+- [x] `recon` использует `qwen.cmd`, `--bare`, fixed read-only prompt,
+  `--approval-mode plan`, clean worktree и bounded turns/tool-calls/wall-time.
+- [x] JSON/schema output валидируется до `QWEN_RECON_READY`; malformed,
+  write/implementation/subagent/acceptance output становится terminal
+  `QWEN_UNUSABLE`.
+- [x] `protocol` exact argv contract не изменён; safe-mode, loop detection,
+  extension, max-depth и raw-free receipt gates сохранены.
+- [x] Recon receipt и append-only lifecycle policy fail closed на budget,
+  loop/fingerprint и continuation; role dispatch и acceptance всегда false.
+- [x] Focused tests покрывают clean/dirty worktree, command contract,
+   structured output, forbidden actions и terminal stops.
+- [x] Raw-free evidence captured for the initial worktree/depth failures and
+  the later native-abort/prompt-budget/baseline failures; no raw error text or
+  secret was published.
+- [x] Final live launch `814298d37ba7487c83c3313b72b1f936` reached
+  `QWEN_RECON_READY` with `EVIDENCE_FOUND`, exact baseline, schema-valid
+  structured output, `writes=false` and all authority markers false.
+
+## 21. Replacement recon lifecycle: fresh-ledger sessions
+
+**Что реализовать:** Заменить recon-specific lifecycle Ticket 20 на модель,
+где terminal ledger необратимо закрыт, каждая новая recon session создаёт новый
+receipt и пустой genesis ledger, а active старый ledger не может присоединиться
+к новому launch. В recon contract не должно быть поля или semantics
+`continuation`; protocol contract не меняется.
+
+**Design:**
+
+- `docs/superpowers/specs/2026-09-21-qwen-recon-lifecycle-replacement-design.md`
+- `docs/superpowers/plans/2026-09-21-qwen-recon-lifecycle-replacement.md`
+
+**Blocked by:** separate authorization for any live Ticket 18 pilot; no automatic launch.
+
+**Status:** implemented locally; F1 `PASS`; `SPEC: SCOPED_PASS`; NOT DONE; live Qwen/recon/protocol and acceptance NOT_RUN.
+
+- [x] Terminal recon ledger необратимо закрыт и никогда не принимается снова.
+- [x] New session требует нового `receipt`, `launch_id`, `session_id`,
+  `ledger_id`, genesis `ledger_anchor` и неповторяемый `fresh_evidence_id`.
+- [x] Active old ledger не принимается с новым `launch_id`; same-session append
+  использует exact receipt identity.
+- [x] Recon не содержит `continuation`; protocol continuation остаётся
+  неизменным.
+- [x] `stop_reason` и `writes` обязательны и schema-equivalent в launcher и
+  canonical report schema.
+- [x] RED matrix, полный suite, validators, PowerShell parse и independent
+  review выполнены; live Qwen/recon/protocol и acceptance не запускались.
+
+F1 closed the two deferred P3 findings: mismatch regressions now assert the
+complete blocked decision (`status=BLOCKED_CAPABILITY`, all three authority
+markers false, and no ledger append), and duplicate active `launch_id`/
+`session_id` checks were removed while preserving reason order.
+
+## 21-F1. Deferred Ticket 21 P3 closure
+
+**Что реализовать:** закрыть только два deferred quality findings Ticket 21;
+не начинать live Ticket 18 и не менять recon design.
+
+**Blocked by:** отдельное разрешение на follow-up implementation.
+
+**Status:** PASS; implementation complete; live Qwen/recon/protocol and acceptance NOT_RUN.
+
+- [x] P3-1: для `session_id` и `ledger_id` mismatch regression paths прямо
+  проверяются `status=BLOCKED_CAPABILITY`, `role_dispatch=false`,
+  `subagent_dispatch=false`, `acceptance=false` и отсутствие нового ledger
+  event.
+- [x] P3-2: дублированные active `launch_id`/`session_id` checks удалены при
+  сохранении reason order, либо добавлены explicit rationale и regression
+  evidence, объясняющие их сохранение.
+- [x] После закрытия обоих критериев получен fresh independent review; Ticket 18
+  live pilot не запускается автоматически.
