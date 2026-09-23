@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** implemented locally; awaiting review/commit
+**Status:** complete; committed in `4751c04` (`feat(qwen): unify bounded runtime contracts`)
 
 - [x] Одинаковые malformed, incomplete, read-only violation и baseline mismatch дают одинаковые raw-free reasons.
 - [x] JSON Schema остаётся декларативным контрактом, а host-side validator сохраняет fail-closed ограничения.

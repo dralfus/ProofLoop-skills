@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — QwenTerminalProjection; 02 — ReconReportContract
 
-**Status:** implemented locally; awaiting review/commit
+**Status:** complete; committed in `4751c04` (`feat(qwen): unify bounded runtime contracts`)
 
 - [x] Protocol и recon сохраняют разные budgets и authority contracts при общей policy seam.
 - [x] Ни один side-effectful Qwen launcher не вызывается до успешного decision.

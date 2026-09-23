@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — QwenTerminalProjection; 02 — ReconReportContract; 03 — QwenGuardPolicy
 
-**Status:** implemented locally; awaiting review/commit
+**Status:** complete; committed in `4751c04` (`feat(qwen): unify bounded runtime contracts`)
 
 - [x] Regression matrix ловит terminal event, malformed JSON, baseline mismatch, no-write и credential-restore failures.
 - [x] Удаление production helper приводит к красному поведенческому тесту через публичные interfaces.

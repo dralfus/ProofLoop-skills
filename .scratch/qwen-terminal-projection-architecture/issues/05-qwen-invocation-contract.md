@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — QwenTerminalProjection; 02 — ReconReportContract
 
-**Status:** implemented locally; awaiting review/commit
+**Status:** complete; committed in `4751c04` (`feat(qwen): unify bounded runtime contracts`)
 
 - [x] Маркеры capabilities, authority flags и argv rendering согласованы между adapters.
 - [x] Protocol, recon и seal не объединяются в один неразличимый режим.

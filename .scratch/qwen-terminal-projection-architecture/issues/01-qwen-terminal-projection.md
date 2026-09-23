@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** implemented locally; awaiting commit/review
+**Status:** complete; committed in `4751c04` (`feat(qwen): unify bounded runtime contracts`)
 
 - [x] Единственный pure-интерфейс принимает наблюдённые stdout/stderr и возвращает raw-free failure projection или terminal structured result.
 - [x] Recon, capture и assist adapters используют одну семантику для success, structured-output missing и auth/forbidden failures; protocol сохраняет намеренно silent output contract.
