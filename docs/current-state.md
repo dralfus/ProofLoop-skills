@@ -214,8 +214,9 @@ result, перегруженный prompt с исчерпанием Qwen turn/to
 `role_dispatch=false`, `subagent_dispatch=false`, `acceptance=false`; budget
 `3/6/5m/depth1`, clean fixed point
 `335ba1dc0364e7bb9ac0413925e1a1e8440cb760`. Это доказательство native
-read-only recon path, но не Implementer и не acceptance evidence. Текущий
-рабочий diff остаётся без commit.
+read-only recon path, но не Implementer и не acceptance evidence. На момент
+записи этот результат ещё находился в незакоммиченном рабочем diff; позднее
+изменения Qwen seal были зафиксированы в `b767ec3`.
 
 2026-09-22 manifest-only seal после bounded test-only candidate также получил
 terminal outcome без retry. Collector исправлен для singleton/array terminal
@@ -239,3 +240,34 @@ Fresh bounded seal `cbffea5e84ed421cb1566e61b7cd4485` (`12/1/300s/depth1`)
 вернул через capture reader `SEALED_CANDIDATE`. Это доказывает E2E
 manifest-only Qwen seal path; transfer, acceptance и product implementation
 не выполнялись. Collector и локальные gates проверены.
+
+2026-09-23 реализован первый архитектурный slice `QwenTerminalProjection`.
+Recon CLI, capture reader и assist parser используют общий pure raw-free
+projection; terminal extraction принимает только финальный `result`, а
+protocol сохраняет silent output contract. Regression/full suite: `138/138`.
+
+2026-09-23 recon contract углублён вторым slice `ReconReportContract`.
+`qwen_assist.py` и PowerShell launcher делегируют одной executable проверке
+shape/terminal fields/facts/read-only/baseline; JSON Schema остаётся wire
+декларацией. Полный suite: `142/142`; PowerShell parser: `ok`. Изменений
+Qwen settings/provider/auth или внешнего MCP-конфига нет.
+
+2026-09-23 реализован третий архитектурный slice `QwenGuardPolicy`.
+Pure pre-dispatch policy связывает projected settings, capabilities, worktree и
+receipt facts; protocol и recon сохраняют разные budgets/authority contracts.
+Guarded PowerShell launcher вызывает child Qwen только после
+`QWEN_GUARD_READY`; stale receipt, fixed-point drift, unsafe settings и
+terminal stop остаются fail-closed.
+
+2026-09-23 Ticket 04 перевёл ключевые Qwen adapter regressions на
+production-shaped behavior fixtures. Matrix публично проверяет terminal event,
+malformed JSON, baseline mismatch, no-write и credential restore; fake Qwen
+используется только локально и не является live/acceptance evidence.
+
+2026-09-23 Ticket 05 добавил `QwenInvocationContract` registry.
+Assist, native recon, protocol, seal и capability-smoke adapters получают
+mode-specific limits, capability markers, exclusions, authority и argv из
+единого pure renderer; contract matrix не запускает Qwen и фиксирует отсутствие
+drift между режимами. Protocol compatibility child также сверяет входной argv
+с registry, а не с локальной копией лимитов. Полный suite после этого slice:
+`154/154`; PowerShell parser и plugin validator: `ok`.

@@ -40,8 +40,11 @@ Seal не является retry `yolo` worker. Это отдельная одн
 - Git integration operation не происходила;
 - ровно одна объявленная targeted command успешно завершилась в этой worktree;
 - baseline candidate совпадает с baseline recon;
-- исходный отказ `yolo` — именно отсутствие terminal structured output на
-  turn limit.
+- исходный отказ `yolo` — отсутствие terminal structured output на turn limit;
+  если host-side collector не смог спроецировать уже наблюдённый terminal
+  envelope, допускается отдельная причина `COLLECTOR_PROJECTION_FAILED` при
+  тех же независимых ограничениях diff и targeted test. Эта причина не
+  утверждает terminal-причину Qwen.
 
 ## Контракт packet и результата
 
@@ -79,9 +82,12 @@ prompt, source text или raw terminal transcript в Git либо metrics.
 ## Критерии приёмки
 
 1. Seal не может стартовать без bounded observed candidate receipt и
-   специфичной причины `missing-yolo-manifest`.
-2. Seal mode не может выполнять write, shell/Git/network/subagent/full-suite
-   actions.
+   специфичной причины отсутствующего yolo manifest: либо
+   `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`, либо
+   `COLLECTOR_PROJECTION_FAILED` только для independently observed
+   collector failure.
+2. Seal mode не может выполнять write, shell/Git/network/MCP/subagent/full-suite
+   actions; launcher передаёт пустой MCP-конфиг и read-only exclusions.
 3. Только exact manifest, созданный Qwen, может перевести unsealed candidate в
    `SEALED_CANDIDATE`; Controller не может синтезировать его самостоятельно.
 4. Несовпадение или отсутствующий output остаются terminal `QWEN_UNUSABLE` без

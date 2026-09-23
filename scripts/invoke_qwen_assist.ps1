@@ -33,6 +33,19 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+$registryMode = if ($ApprovalMode -eq 'seal') { 'seal' } elseif ($ApprovalMode -eq 'yolo') { 'assist_yolo' } else { 'assist' }
+try {
+    $registryJson = & python (Join-Path $PSScriptRoot 'qwen_invocation_contract.py') '--mode' $registryMode '--contract' 2>$null | Out-String
+    $registryExitCode = if (Test-Path Variable:global:LASTEXITCODE) { [int]$global:LASTEXITCODE } else { 0 }
+    if ($registryExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($registryJson)) { throw 'Invocation registry unavailable.' }
+    $invocationContract = $registryJson | ConvertFrom-Json
+}
+catch {
+    @{ status = 'BLOCKED_CAPABILITY'; reason = 'INVOCATION_CONTRACT_UNAVAILABLE' } | ConvertTo-Json -Compress
+    exit 3
+}
+
 if ($ApprovalMode -eq 'yolo' -and -not $SuccessfulRecon) {
     throw 'ApprovalMode yolo requires -SuccessfulRecon.'
 }
@@ -72,12 +85,7 @@ if ($ApprovalMode -eq 'seal') {
     if ($sealReservation.status -ne 'PATCH_SEAL_RESERVED') { throw "ApprovalMode seal refused: $($sealReservation.reason)." }
 }
 
-$requiredMarkers = @(
-    '--prompt', '--output-format', '--json-schema', '--worktree',
-    '--approval-mode', '--max-session-turns', '--max-wall-time',
-    '--max-tool-calls', '--exclude-tools',
-    '--bare'
-)
+$requiredMarkers = @($invocationContract.required_markers)
 $help = (& qwen --help | Out-String)
 $missing = @($requiredMarkers | Where-Object { $help -notlike "*$_*" })
 if ($help -notlike '*plan*') {
@@ -97,12 +105,15 @@ $authArgs = @()
 if ($AuthType) {
     $authArgs = @('--auth-type', $AuthType)
 }
-$effectiveApprovalMode = if ($ApprovalMode -eq 'seal') { 'plan' } else { $ApprovalMode }
+$effectiveApprovalMode = [string]$invocationContract.approval_mode
 $effectivePrompt = if ($ApprovalMode -eq 'seal') { "$Prompt`nPATCH_SEAL_RECEIPT:`n$patchSealReceipt`nCall structured_output exactly once with the manifest matching the patch schema. Do not inspect or edit code, use shell/network, or create subagents." } else { $Prompt }
-$excludedTools = if ($effectiveApprovalMode -eq 'plan') { 'Agent,edit,notebook_edit,run_shell_command' } else { 'Agent,run_shell_command' }
-$maxSessionTurns = if ($ApprovalMode -eq 'seal') { '12' } else { '12' }
-$maxWallTime = if ($ApprovalMode -eq 'seal') { '300s' } else { '10m' }
-$maxToolCalls = if ($ApprovalMode -eq 'seal') { '1' } else { '20' }
+$excludedTools = [string]$invocationContract.exclude_tools
+$disabledSlashCommands = [string]$invocationContract.disabled_slash_commands
+$mcpArgs = if ($invocationContract.mcp_config) { @('--mcp-config', [string]$invocationContract.mcp_config) } else { @() }
+$maxSessionTurns = [string]$invocationContract.limits.max_session_turns
+$maxWallTime = [string]$invocationContract.limits.max_wall_time
+$maxToolCalls = [string]$invocationContract.limits.max_tool_calls
+$maxSubagentDepth = [string]$invocationContract.limits.max_subagent_depth
 
 . "$PSScriptRoot\qwen_credential.ps1"
 $previousApiKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY', 'Process')
@@ -128,9 +139,10 @@ try {
         '--max-session-turns' $maxSessionTurns `
         '--max-wall-time' $maxWallTime `
         '--max-tool-calls' $maxToolCalls `
-        '--max-subagent-depth' '1' `
+        '--max-subagent-depth' $maxSubagentDepth `
         '--exclude-tools' $excludedTools `
-        '--disabled-slash-commands' 'review,loop' `
+        '--disabled-slash-commands' $disabledSlashCommands `
+        @mcpArgs `
         '--prompt' $effectivePrompt
     $exitCode = $LASTEXITCODE
 }

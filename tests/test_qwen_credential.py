@@ -77,9 +77,10 @@ class QwenCredentialTest(unittest.TestCase):
         self.assertIn("--validate-patch-seal-manifest", reader)
         self.assertIn("SEALED_CANDIDATE", reader)
 
-    def test_finish_ticket_collector_normalizes_single_property_collections(self) -> None:
+    def test_finish_ticket_collector_delegates_recon_contract_to_shared_validator(self) -> None:
         collector = FINISH_TICKET.read_text(encoding="utf-8")
-        self.assertIn("@($fact.PSObject.Properties.Name).Count", collector)
+        self.assertIn("recon_report_contract.py", collector)
+        self.assertIn("'--input-file'", collector)
         self.assertNotIn("$fact.PSObject.Properties.Name.Count", collector)
 
     def test_capture_reader_accepts_single_terminal_result_without_scalar_count_failure(self) -> None:
@@ -150,6 +151,56 @@ class QwenCredentialTest(unittest.TestCase):
         projection = json.loads(result.stdout)
         self.assertEqual(projection, {"status": "SEALED_CANDIDATE", "pid": 2147483647})
         self.assertNotIn("structured_result", result.stdout)
+
+    def test_capture_reader_accepts_terminal_result_without_optional_metadata(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the capture-reader contract")
+
+        receipt = {
+            "baseline": "abc123",
+            "files": ["tests/test_qwen_assist.py"],
+            "changed_lines": 17,
+            "targeted_tests": ["python -m unittest tests.test_qwen_assist"],
+            "targeted_exit_code": 0,
+            "git_operations": [],
+            "full_suite": False,
+            "yolo_reason": "STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT",
+        }
+        manifest = {
+            "successful_recon": True,
+            "files": receipt["files"],
+            "changed_lines": receipt["changed_lines"],
+            "targeted_tests": receipt["targeted_tests"],
+            "git_operations": [],
+            "full_suite": False,
+        }
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            run_id = "d" * 32
+            capture_path = temporary_root / run_id
+            capture_path.mkdir()
+            (capture_path / "stdout.json").write_text(
+                json.dumps({"type": "result", "structured_result": manifest}),
+                encoding="utf-8",
+            )
+            (capture_path / "stderr.txt").write_text("", encoding="utf-8")
+            receipt_path = temporary_root / "receipt.json"
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    PWSH, "-NoProfile", "-File", str(CAPTURE_READER),
+                    "-RunId", run_id, "-ProcessId", "2147483647",
+                    "-PatchSealReceiptPath", str(receipt_path),
+                    "-CaptureDirectory", str(temporary_root),
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {"status": "SEALED_CANDIDATE", "pid": 2147483647})
 
     def test_capture_reader_requires_final_result_event_for_array_output(self) -> None:
         self.assertIsNotNone(PWSH, "PowerShell is required for the capture-reader contract")

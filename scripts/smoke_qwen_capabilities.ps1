@@ -8,12 +8,27 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$requiredCapabilities = [ordered]@{
-    prompt = '--prompt'
-    max_session_turns = '--max-session-turns'
-    max_tool_calls = '--max-tool-calls'
-    max_wall_time = '--max-wall-time'
-    max_subagent_depth = '--max-subagent-depth'
+try {
+    $registryJson = & python (Join-Path $PSScriptRoot 'qwen_invocation_contract.py') '--mode' 'capability_smoke' '--contract' 2>$null | Out-String
+    $registryExitCode = if (Test-Path Variable:global:LASTEXITCODE) { [int]$global:LASTEXITCODE } else { 0 }
+    if ($registryExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($registryJson)) { throw 'Invocation registry unavailable.' }
+    $invocationContract = $registryJson | ConvertFrom-Json
+    $markerNames = @{
+        '--prompt' = 'prompt'
+        '--max-session-turns' = 'max_session_turns'
+        '--max-tool-calls' = 'max_tool_calls'
+        '--max-wall-time' = 'max_wall_time'
+        '--max-subagent-depth' = 'max_subagent_depth'
+    }
+    $requiredCapabilities = [ordered]@{}
+    foreach ($marker in @($invocationContract.required_markers)) {
+        if (-not $markerNames.ContainsKey([string]$marker)) { throw 'Invocation registry capability marker is unsupported.' }
+        $requiredCapabilities[$markerNames[[string]$marker]] = [string]$marker
+    }
+}
+catch {
+    @{ status = 'BLOCKED_CAPABILITY'; reason = 'INVOCATION_CONTRACT_UNAVAILABLE'; role_dispatch = $false; acceptance = $false } | ConvertTo-Json -Compress
+    exit 3
 }
 
 function Invoke-QwenProbe {

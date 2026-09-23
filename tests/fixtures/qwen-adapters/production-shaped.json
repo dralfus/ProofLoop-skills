@@ -1,0 +1,75 @@
+{
+  "terminal_success": {
+    "stdout": [
+      {"type": "message", "role": "assistant", "content": "inspecting"},
+      {
+        "type": "result",
+        "is_error": false,
+        "subtype": "success",
+        "structured_result": {
+          "status": "EVIDENCE_FOUND",
+          "baseline": "abc123",
+          "facts": [
+            {"file": "README.md", "line": 1, "fact": "one"},
+            {"file": "README.md", "line": 2, "fact": "two"},
+            {"file": "README.md", "line": 3, "fact": "three"}
+          ],
+          "state_owner": "owner",
+          "callback_boundary": "boundary",
+          "acceptance_risk": "risk",
+          "stop_reason": null,
+          "writes": []
+        }
+      }
+    ],
+    "expected": "EVIDENCE_FOUND"
+  },
+  "malformed_json": {
+    "stdout": "{not-json",
+    "stderr": "",
+    "expected": "QWEN_COMMAND_FAILED"
+  },
+  "baseline_mismatch": {
+    "report": {
+      "status": "EVIDENCE_FOUND",
+      "baseline": "abc123",
+      "facts": [
+        {"file": "README.md", "line": 1, "fact": "one"},
+        {"file": "README.md", "line": 2, "fact": "two"},
+        {"file": "README.md", "line": 3, "fact": "three"}
+      ],
+      "state_owner": "owner",
+      "callback_boundary": "boundary",
+      "acceptance_risk": "risk",
+      "stop_reason": null,
+      "writes": []
+    },
+    "expected_baseline": "different",
+    "expected": "BASELINE_MISMATCH"
+  },
+  "no_write": {
+    "report": {
+      "status": "EVIDENCE_FOUND",
+      "baseline": "abc123",
+      "facts": [
+        {"file": "README.md", "line": 1, "fact": "one"},
+        {"file": "README.md", "line": 2, "fact": "two"},
+        {"file": "README.md", "line": 3, "fact": "three"}
+      ],
+      "state_owner": "owner",
+      "callback_boundary": "boundary",
+      "acceptance_risk": "risk",
+      "stop_reason": null,
+      "writes": ["src/a.cs"]
+    },
+    "expected": "READ_ONLY_VIOLATION"
+  },
+  "credential_restore": {
+    "old": {
+      "OPENAI_API_KEY": "old-key",
+      "OPENAI_BASE_URL": "old-base",
+      "OPENAI_MODEL": "old-model"
+    },
+    "expected": "restored"
+  }
+}

@@ -64,6 +64,20 @@ argv compatibility; версия Qwen только сохраняется в о�
 `qwen.cmd` или сторонние runners. `QWEN_ASSIST` из Codex Desktop остаётся
 отдельным bounded bridge.
 
+Перед child dispatch launcher передаёт projected settings, capabilities,
+worktree facts и receipt facts в pure `scripts/qwen_guard_policy.py`. Только
+`QWEN_GUARD_READY` разрешает вызов Qwen; policy возвращает raw-free authority
+flags и сохраняет разные protocol/recon budgets. Ошибка freshness, fixed point,
+loop detection или terminal stop остаётся fail-closed.
+
+Mode-specific argv и capability markers берутся из pure registry
+`scripts/qwen_invocation_contract.py`: `assist`, `native_recon`, `protocol`,
+`seal` и `capability_smoke` не сводятся к одному универсальному режиму.
+
+Mode-specific argv и capability markers берутся из pure registry
+`scripts/qwen_invocation_contract.py`: `assist`, `native_recon`, `protocol`,
+`seal` и `capability_smoke` не сводятся к одному универсальному режиму.
+
 ### Native guarded `recon`
 
 Native launcher имеет отдельный explicit `-Mode recon`; это не сокращённый

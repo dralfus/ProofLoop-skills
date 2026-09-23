@@ -61,6 +61,17 @@ ProofLoop поставляет отдельный launcher, который до 
 Новый launcher является дополнительным executable entry point; существующие
 Qwen команды и настройки других программ не переписываются.
 
+Общая pre-dispatch seam реализована pure-модулем
+`scripts/qwen_guard_policy.py`. Adapter передаёт ему только projected
+settings, capability markers, worktree facts и receipt facts через временный
+JSON-файл. `QWEN_GUARD_READY` является единственным разрешением на child
+dispatch; policy возвращает raw-free authority flags, проверяет freshness и
+fixed point и не запускает процессы сама. Protocol сохраняет `20/20/30m` и
+Controller authority, recon — `3/6/5m`, read-only и authority flags `false`.
+Canonical argv, capability markers и exclusions для этих режимов находятся в
+pure registry `scripts/qwen_invocation_contract.py`; отдельные `seal` и
+`capability_smoke` entries не переиспользуют protocol/recon contract.
+
 Ticket 19 уточняет только этот launcher capability path. Exact-version policy
 для отдельного Qwen role-agent profile и acceptance lifecycle не изменяется
 этим ticket.

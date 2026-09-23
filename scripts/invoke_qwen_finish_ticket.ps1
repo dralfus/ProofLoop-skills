@@ -90,68 +90,83 @@ function Get-ReconFixedPoint {
 }
 
 function Test-ReconReport {
-    param([Parameter(Mandatory)] [object]$Report)
+    param(
+        [Parameter(Mandatory)] [object]$Report,
+        [AllowEmptyString()] [string]$ExpectedBaseline
+    )
 
-    if ($null -eq $Report -or $Report -isnot [pscustomobject]) {
-        return @{ valid = $false; reason = 'MALFORMED_REPORT' }
-    }
-    $allowedFields = @('status', 'baseline', 'facts', 'state_owner', 'callback_boundary', 'acceptance_risk', 'stop_reason', 'writes')
-    $unexpected = @($Report.PSObject.Properties.Name | Where-Object { $_ -notin $allowedFields })
-    if ($unexpected.Count -gt 0) {
-        return @{ valid = $false; reason = 'MALFORMED_REPORT' }
-    }
-    if ($Report.PSObject.Properties['status'] -eq $null -or [string]$Report.status -notin @('EVIDENCE_FOUND', 'BLOCKED', 'QWEN_UNUSABLE')) {
-        return @{ valid = $false; reason = 'INVALID_STATUS' }
-    }
-    $writesProperty = $Report.PSObject.Properties['writes']
-    $stopReasonProperty = $Report.PSObject.Properties['stop_reason']
-    if ($null -eq $writesProperty -or $null -eq $stopReasonProperty) {
-        return @{ valid = $false; reason = 'MALFORMED_REPORT' }
-    }
-    if ($null -eq $Report.writes -or $Report.writes -isnot [array]) {
-        return @{ valid = $false; reason = 'MALFORMED_REPORT' }
-    }
-    foreach ($write in @($Report.writes)) {
-        if ($write -isnot [string]) {
+    $reportPath = [IO.Path]::GetTempFileName()
+    try {
+        $Report | ConvertTo-Json -Depth 16 -Compress | Set-Content -LiteralPath $reportPath -Encoding utf8
+        $arguments = @(
+            (Join-Path $PSScriptRoot 'recon_report_contract.py'),
+            '--input-file', $reportPath
+        )
+        if ($PSBoundParameters.ContainsKey('ExpectedBaseline')) {
+            $arguments += @('--expected-baseline', $ExpectedBaseline)
+        }
+        $verdictJson = & python @arguments 2>$null | Out-String
+        $pythonExitCode = if (Test-Path Variable:global:LASTEXITCODE) { [int]$global:LASTEXITCODE } else { 0 }
+        if ($pythonExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($verdictJson)) {
             return @{ valid = $false; reason = 'MALFORMED_REPORT' }
         }
-    }
-    if (@($Report.writes).Count -gt 0) {
-        return @{ valid = $false; reason = 'READ_ONLY_VIOLATION' }
-    }
-    if ($null -ne $Report.stop_reason -and $Report.stop_reason -isnot [string]) {
+        try {
+            $verdict = $verdictJson | ConvertFrom-Json
+        }
+        catch {
+            return @{ valid = $false; reason = 'MALFORMED_REPORT' }
+        }
+        if ($verdict.valid -eq $true) {
+            return @{ valid = $true; report = $Report }
+        }
+        if ($verdict.reason -is [string] -and $verdict.reason.Trim()) {
+            return @{ valid = $false; reason = [string]$verdict.reason }
+        }
         return @{ valid = $false; reason = 'MALFORMED_REPORT' }
     }
-    if ([string]$Report.status -eq 'EVIDENCE_FOUND' -and ($null -ne $Report.stop_reason -or @($Report.writes).Count -ne 0)) {
-        return @{ valid = $false; reason = 'MALFORMED_REPORT' }
+    finally {
+        Remove-Item -LiteralPath $reportPath -Force -ErrorAction SilentlyContinue
     }
-    if ([string]$Report.status -ne 'EVIDENCE_FOUND') {
-        return @{ valid = $false; reason = 'RECON_REPORT_BLOCKED' }
-    }
-    foreach ($field in @('baseline', 'state_owner', 'callback_boundary', 'acceptance_risk')) {
-        if ($Report.PSObject.Properties[$field] -eq $null -or $Report.$field -isnot [string] -or -not $Report.$field.Trim()) {
-            return @{ valid = $false; reason = 'INCOMPLETE_RECON' }
+}
+
+function Invoke-QwenGuardPolicy {
+    param([Parameter(Mandatory)] [object]$PolicyInput)
+
+    $inputPath = [IO.Path]::GetTempFileName()
+    try {
+        $PolicyInput | ConvertTo-Json -Depth 16 -Compress | Set-Content -LiteralPath $inputPath -Encoding utf8
+        $policyJson = & python (Join-Path $PSScriptRoot 'qwen_guard_policy.py') '--input-file' $inputPath 2>$null | Out-String
+        $pythonExitCode = if (Test-Path Variable:global:LASTEXITCODE) { [int]$global:LASTEXITCODE } else { 0 }
+        if ($pythonExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($policyJson)) {
+            return [pscustomobject]@{ status = 'BLOCKED_CAPABILITY'; reason = 'GUARD_POLICY_UNAVAILABLE' }
+        }
+        try {
+            return $policyJson | ConvertFrom-Json
+        }
+        catch {
+            return [pscustomobject]@{ status = 'BLOCKED_CAPABILITY'; reason = 'GUARD_POLICY_MALFORMED' }
         }
     }
-    if ($Report.PSObject.Properties['facts'] -eq $null) {
-        return @{ valid = $false; reason = 'INSUFFICIENT_FACTS' }
+    finally {
+        Remove-Item -LiteralPath $inputPath -Force -ErrorAction SilentlyContinue
     }
-    if ($Report.facts -isnot [array]) {
-        return @{ valid = $false; reason = 'MALFORMED_FACT' }
+}
+
+function Get-QwenRegistryArguments {
+    param([Parameter(Mandatory)] [string]$Mode, [Parameter(Mandatory)] [string]$Ticket)
+
+    try {
+        $rendered = & python (Join-Path $PSScriptRoot 'qwen_invocation_contract.py') `
+            '--mode' $Mode '--ticket' $Ticket 2>$null | Out-String
+        $exitCode = if (Test-Path Variable:global:LASTEXITCODE) { [int]$global:LASTEXITCODE } else { 0 }
+        if ($exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($rendered)) { Stop-Guard -Reason 'INVOCATION_CONTRACT_UNAVAILABLE' }
+        $argv = @($rendered | ConvertFrom-Json)
+        if ($argv.Count -eq 0 -or @($argv | Where-Object { $_ -isnot [string] }).Count -gt 0) { Stop-Guard -Reason 'INVOCATION_CONTRACT_MALFORMED' }
+        return $argv
     }
-    $facts = @($Report.facts)
-    if ($facts.Count -lt 3) {
-        return @{ valid = $false; reason = 'INSUFFICIENT_FACTS' }
+    catch {
+        Stop-Guard -Reason 'INVOCATION_CONTRACT_UNAVAILABLE'
     }
-    foreach ($fact in $facts) {
-        if ($fact -isnot [pscustomobject] -or @($fact.PSObject.Properties.Name).Count -ne 3 -or
-            $fact.PSObject.Properties['file'] -eq $null -or $fact.file -isnot [string] -or -not $fact.file.Trim() -or
-            $fact.PSObject.Properties['line'] -eq $null -or ($fact.line -isnot [int32] -and $fact.line -isnot [int64]) -or $fact.line -lt 1 -or
-            $fact.PSObject.Properties['fact'] -eq $null -or $fact.fact -isnot [string] -or -not $fact.fact.Trim()) {
-            return @{ valid = $false; reason = 'MALFORMED_FACT' }
-        }
-    }
-    return @{ valid = $true; report = $Report }
 }
 
 function New-ReconFreshEvidenceId {
@@ -180,7 +195,10 @@ function New-ReconFreshEvidenceId {
 }
 
 function Convert-ReconOutput {
-    param([Parameter(Mandatory)] [string]$Output)
+    param(
+        [Parameter(Mandatory)] [string]$Output,
+        [AllowEmptyString()] [string]$ExpectedBaseline
+    )
 
     if (-not $Output.Trim()) {
         return @{ valid = $false; reason = 'INVALID_JSON_OUTPUT' }
@@ -197,7 +215,7 @@ function Convert-ReconOutput {
         }
         $parsed = $parsed[-1].structured_result
     }
-    return Test-ReconReport -Report $parsed
+    return Test-ReconReport -Report $parsed -ExpectedBaseline $ExpectedBaseline
 }
 
 function Get-QwenFailureProjection {
@@ -456,15 +474,36 @@ catch {
     Stop-Guard -Reason 'RECEIPT_WRITE_FAILED'
 }
 
+$guardWorktree = @{ available = $true }
+if ($Mode -eq 'recon') {
+    $guardWorktree.clean = $true
+    $guardWorktree.fixed_point = $reconFixedPoint
+}
+$guardInput = [ordered]@{
+    operation = 'guard_preflight'
+    mode = $Mode
+    now_utc = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+    max_receipt_age_seconds = 300
+    settings = @{
+        skipLoopDetection = [bool]$skipLoopDetection.Value
+        maxToolCallsPerTurn = [int]$maxToolCallsPerTurn.Value
+        maxSubagentDepth = [int]$maxSubagentDepth.Value
+    }
+    worktree = $guardWorktree
+    capabilities = @{ markers = @($requiredCliCapabilities + 'plan') }
+    receipt = $receipt
+    terminal_stop = $false
+}
+$guardDecision = Invoke-QwenGuardPolicy -PolicyInput $guardInput
+if ($guardDecision.status -ne 'QWEN_GUARD_READY') {
+    $guardExitCode = if ($guardDecision.status -eq 'BLOCKED_CAPABILITY') { 3 } else { 4 }
+    Write-GuardStatus -Status ([string]$guardDecision.status) -Reason ([string]$guardDecision.reason) -LaunchId $launchId
+    exit $guardExitCode
+}
+
 $cliCompatibilityConsumer = Join-Path $PSScriptRoot 'invoke_qwen_finish_ticket_cli.ps1'
 if ($Mode -eq 'protocol') {
-    $qwenArguments = @(
-        '--max-session-turns', [string]$limits.max_session_turns,
-        '--max-tool-calls', [string]$limits.max_tool_calls,
-        '--max-wall-time', $limits.max_wall_time,
-        '--max-subagent-depth', [string]$limits.max_subagent_depth,
-        '--prompt', "/finish-ticket ticket $Ticket"
-    )
+    $qwenArguments = @(Get-QwenRegistryArguments -Mode 'protocol' -Ticket $Ticket)
 
     try {
         $qwenExitCode = 0
@@ -502,16 +541,11 @@ if ($qwenExitCode -ne 0) {
     exit 4
 }
 
-$reconValidation = Convert-ReconOutput -Output $reconOutput
+$reconValidation = Convert-ReconOutput -Output $reconOutput -ExpectedBaseline $reconFixedPoint
 if (-not $reconValidation.valid) {
     Write-GuardStatus -Status 'QWEN_UNUSABLE' -Reason ([string]$reconValidation.reason) -LaunchId $launchId
     exit 4
 }
-if ($reconValidation.report.baseline -ne $reconFixedPoint) {
-    Write-GuardStatus -Status 'QWEN_UNUSABLE' -Reason 'BASELINE_MISMATCH' -LaunchId $launchId
-    exit 4
-}
-
 @{
     status = 'QWEN_RECON_READY'
     launch_id = $launchId

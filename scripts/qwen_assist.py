@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -10,10 +11,36 @@ import subprocess
 from pathlib import Path
 
 
+_TERMINAL_PROJECTION_SPEC = importlib.util.spec_from_file_location(
+    "proofloop_qwen_terminal_projection",
+    Path(__file__).with_name("qwen_terminal_projection.py"),
+)
+assert _TERMINAL_PROJECTION_SPEC and _TERMINAL_PROJECTION_SPEC.loader
+_TERMINAL_PROJECTION = importlib.util.module_from_spec(_TERMINAL_PROJECTION_SPEC)
+_TERMINAL_PROJECTION_SPEC.loader.exec_module(_TERMINAL_PROJECTION)
+
+_RECON_CONTRACT_SPEC = importlib.util.spec_from_file_location(
+    "proofloop_recon_report_contract",
+    Path(__file__).with_name("recon_report_contract.py"),
+)
+assert _RECON_CONTRACT_SPEC and _RECON_CONTRACT_SPEC.loader
+_RECON_CONTRACT = importlib.util.module_from_spec(_RECON_CONTRACT_SPEC)
+_RECON_CONTRACT_SPEC.loader.exec_module(_RECON_CONTRACT)
+
+_INVOCATION_CONTRACT_SPEC = importlib.util.spec_from_file_location(
+    "proofloop_qwen_invocation_contract",
+    Path(__file__).with_name("qwen_invocation_contract.py"),
+)
+assert _INVOCATION_CONTRACT_SPEC and _INVOCATION_CONTRACT_SPEC.loader
+_INVOCATION_CONTRACT = importlib.util.module_from_spec(_INVOCATION_CONTRACT_SPEC)
+_INVOCATION_CONTRACT_SPEC.loader.exec_module(_INVOCATION_CONTRACT)
+
+
 MAX_ATTEMPTS = 7
-MAX_RECON_TURNS = 12
-MAX_RECON_TOOL_CALLS = 20
-MAX_RECON_WALL_TIME = "10m"
+_ASSIST_LIMITS = _INVOCATION_CONTRACT.get_contract("assist")["limits"]
+MAX_RECON_TURNS = int(_ASSIST_LIMITS["max_session_turns"])
+MAX_RECON_TOOL_CALLS = int(_ASSIST_LIMITS["max_tool_calls"])
+MAX_RECON_WALL_TIME = str(_ASSIST_LIMITS["max_wall_time"])
 PATCH_SEAL_ELIGIBLE_REASONS = {
     "STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT",
     "COLLECTOR_PROJECTION_FAILED",
@@ -61,32 +88,13 @@ def build_recon_command(
     *, qwen_command: str, prompt: str, schema_path: str, worktree: str
 ) -> list[str]:
     """Build one read-only Qwen invocation without a model fallback."""
-    return [
-        qwen_command,
-        "--bare",
-        "--approval-mode",
-        "plan",
-        "--output-format",
-        "json",
-        "--json-schema",
-        f"@{schema_path}",
-        "--worktree",
-        worktree,
-        "--max-session-turns",
-        str(MAX_RECON_TURNS),
-        "--max-wall-time",
-        MAX_RECON_WALL_TIME,
-        "--max-tool-calls",
-        str(MAX_RECON_TOOL_CALLS),
-        "--max-subagent-depth",
-        "1",
-        "--exclude-tools",
-        "Agent,edit,notebook_edit,run_shell_command",
-        "--disabled-slash-commands",
-        "review,loop",
-        "--prompt",
-        prompt,
-    ]
+    return _INVOCATION_CONTRACT.render_command(
+        "assist",
+        qwen_command=qwen_command,
+        prompt=prompt,
+        schema_path=schema_path,
+        worktree=worktree,
+    )
 
 
 def run_recon(
@@ -128,35 +136,21 @@ def _non_empty_string(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
-def validate_recon_report(report: object) -> dict[str, object]:
-    """Validate Qwen evidence before it can enter the Controller packet."""
-    if not isinstance(report, dict):
-        return {"status": "QWEN_UNUSABLE", "reason": "MALFORMED_REPORT"}
-    status = report.get("status")
-    if status not in {"EVIDENCE_FOUND", "BLOCKED", "QWEN_UNUSABLE"}:
-        return {"status": "QWEN_UNUSABLE", "reason": "INVALID_STATUS"}
-    if report.get("writes"):
-        return {"status": "QWEN_UNUSABLE", "reason": "READ_ONLY_VIOLATION"}
-    if status != "EVIDENCE_FOUND":
-        return {"status": status, "reason": report.get("stop_reason") or "NO_EVIDENCE"}
-    if not _non_empty_string(report.get("baseline")):
-        return {"status": "QWEN_UNUSABLE", "reason": "MISSING_BASELINE"}
-    facts = report.get("facts")
-    if not isinstance(facts, list) or len(facts) < 3:
-        return {"status": "QWEN_UNUSABLE", "reason": "INSUFFICIENT_FACTS"}
-    for fact in facts:
-        if (
-            not isinstance(fact, dict)
-            or not _non_empty_string(fact.get("file"))
-            or not isinstance(fact.get("line"), int)
-            or fact["line"] < 1
-            or not _non_empty_string(fact.get("fact"))
-        ):
-            return {"status": "QWEN_UNUSABLE", "reason": "MALFORMED_FACT"}
-    required_fields = ("state_owner", "callback_boundary", "acceptance_risk")
-    if any(not _non_empty_string(report.get(field)) for field in required_fields):
-        return {"status": "QWEN_UNUSABLE", "reason": "INCOMPLETE_RECON"}
-    return {"status": "EVIDENCE_FOUND"}
+def validate_recon_report(
+    report: object, *, expected_baseline: str | None = None
+) -> dict[str, object]:
+    """Validate Qwen evidence through the shared semantic contract."""
+    verdict = _RECON_CONTRACT.validate_recon_report(
+        report, expected_baseline=expected_baseline
+    )
+    if verdict.get("valid"):
+        return {"status": "EVIDENCE_FOUND"}
+    if verdict.get("reason") == "RECON_REPORT_BLOCKED" and isinstance(report, dict):
+        return {
+            "status": report.get("status"),
+            "reason": report.get("stop_reason") or "NO_EVIDENCE",
+        }
+    return {"status": "QWEN_UNUSABLE", "reason": verdict.get("reason")}
 
 
 def _normalize_root_cause(value: object) -> str:
@@ -167,20 +161,14 @@ def _normalize_root_cause(value: object) -> str:
 
 def parse_terminal_json(stdout: str) -> object:
     """Accept only one terminal JSON object; transcripts are not evidence."""
+    structured_result = _TERMINAL_PROJECTION.extract_structured_result(stdout)
+    if structured_result is not None:
+        return structured_result
     try:
         parsed = json.loads(stdout)
     except json.JSONDecodeError:
         return None
-    if isinstance(parsed, dict):
-        return parsed
-    if not isinstance(parsed, list) or not parsed:
-        return None
-    terminal_event = parsed[-1]
-    if not isinstance(terminal_event, dict) or terminal_event.get("type") != "result":
-        return None
-    structured_result = terminal_event.get("structured_result")
-
-    return structured_result if isinstance(structured_result, dict) else None
+    return parsed if isinstance(parsed, dict) and parsed.get("type") is None else None
 
 def next_qwen_attempt(
     ledger: object, candidate: object

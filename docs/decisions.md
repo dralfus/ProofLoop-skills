@@ -856,3 +856,109 @@ primary cause. Дополнительно штатный slug `qwen-patch-ticket
 launch `cbffea5e84ed421cb1566e61b7cd4485` (`12/1/300s/depth1`) вернул через
 capture reader `SEALED_CANDIDATE`. Transfer, acceptance и product
 implementation не выполнялись.
+
+## D040 — Единый QwenTerminalProjection для terminal transport
+
+Статус: принято и реализовано локально 2026-09-23.
+
+Наблюдаемый failure: CLI bridge, recon launcher и capture reader независимо
+классифицировали terminal JSON, structured-output failure и error envelope.
+Расхождение правил могло дать разные raw-free reasons для одного Qwen
+transport outcome.
+
+Решение: выделить pure Python module `QwenTerminalProjection`. Его interface
+принимает stdout/stderr и возвращает только allowlisted projection; отдельный
+extractor принимает только финальный `type=result` со schema-valid
+`structured_result`. PowerShell adapters отвечают лишь за I/O и exit mapping;
+протокол сохраняет намеренно silent output contract.
+
+Измеримый результат: recon, capture и assist paths используют общий parser;
+fixtures покрывают terminal success, structured-output missing, auth/forbidden,
+malformed и trailing-transcript cases; полный suite `138/138`, PowerShell
+parser `ok`. Raw message, transcript и secrets в projection не попадают.
+
+## D041 — Единый executable contract для QWEN_RECON_REPORT
+
+Статус: принято и реализовано локально 2026-09-23.
+
+Наблюдаемый failure: Python `qwen_assist.py` и PowerShell recon launcher
+валидаировали один `QWEN_RECON_REPORT` разными правилами. Python принимал
+отсутствующие terminal fields и лишние fact properties, а PowerShell выполнял
+собственную копию проверок. Это создавало риск разных raw-free причин для
+одного malformed, read-only или baseline-mismatch output.
+
+Решение: `scripts/recon_report_contract.py` владеет executable semantic
+contract: allowlisted fields, terminal `stop_reason`/`writes`, exact locatable
+facts, read-only violation и optional fixed-point comparison. JSON Schema
+остаётся декларативным wire contract; Python и PowerShell adapters делегируют
+ему semantic verdict, не передавая raw output через аргументы.
+
+Измеримый результат: production-shaped valid/malformed/write/baseline fixtures
+покрыты Python contract tests и PowerShell launcher regressions; полный suite
+`142/142`, PowerShell parser `ok`. Qwen settings, provider, credentials и
+внешний MCP-конфиг не изменялись.
+
+## D042 — Общая QwenGuardPolicy до native dispatch
+
+Статус: принято и реализовано локально 2026-09-23.
+
+Наблюдаемый failure: guarded PowerShell launcher имел inline-проверки
+settings/capabilities/worktree, а protocol и recon различались только по
+разрозненным ветвям. Не было одного проверяемого решения, которое связывает
+budget, authority flags, receipt freshness и fixed point до вызова Qwen.
+
+Решение: выделить pure `scripts/qwen_guard_policy.py`. Он принимает только
+raw-free projected settings, worktree facts, capability markers и receipt
+facts; возвращает `QWEN_GUARD_READY`, `BLOCKED_CAPABILITY` или terminal
+`QWEN_RUNTIME_GUARD_STOP` с явными authority flags. Protocol сохраняет
+`20/20/30m` и role/subagent authority, recon — `3/6/5m`, read-only и все
+authority flags false. PowerShell adapter вызывает policy через временный
+JSON-файл и не dispatch'ит child Qwen до `QWEN_GUARD_READY`.
+
+Измеримый результат: unit matrix покрывает budgets, settings, capabilities,
+stale receipt, dirty worktree, fixed-point drift, loop/terminal stop и raw-free
+output; launcher recon/protocol regressions проходят, PowerShell parser `ok`.
+Qwen settings, provider, credentials и внешний MCP-конфиг не изменялись.
+
+## D043 — Production-shaped behavioral fixtures для Qwen adapters
+
+Статус: принято и реализовано локально 2026-09-23.
+
+Наблюдаемый failure: часть Qwen regression tests подтверждала поведение через
+поиск строк в PowerShell source. Такой тест мог остаться зелёным после
+поломки runtime helper и не покрывал совместную семантику terminal,
+recon-report и credential boundary.
+
+Решение: добавить fixture matrix
+`tests/fixtures/qwen-adapters/production-shaped.json` и runner, который
+вызывает публичные `QwenTerminalProjection`/`ReconReportContract` interfaces.
+Отдельный PowerShell fixture запускает public wrapper с fake Qwen и stub
+Credential Manager, наблюдая фактический restore `OPENAI_*` после failure.
+Source assertions остаются только минимальным adapter smoke coverage.
+
+Измеримый результат: matrix покрывает terminal success, malformed JSON,
+baseline mismatch, read-only write violation и credential restore; fixture
+runner `2/2` зелёный. Fixture-only GREEN не является acceptance evidence.
+
+## D044 — Единый QwenInvocationContract registry
+
+Статус: принято и реализовано локально 2026-09-23.
+
+Наблюдаемый failure: assist, native recon, protocol, seal и capability smoke
+держали budgets, capability markers, exclusions и argv в разных PowerShell/
+Python ветвях. Это позволяло тихо дрейфовать mode-specific contract и смешать
+read-only recon с protocol или seal.
+
+Решение: `scripts/qwen_invocation_contract.py` стал pure registry и renderer.
+Он хранит отдельные mode entries для assist, assist-yolo, seal, native recon,
+protocol и capability smoke с authority flags; adapters получают из registry
+limits/markers и canonical argv, а provider/auth values остаются внешними
+inputs. Registry не запускает Qwen и не содержит credentials.
+
+Измеримый результат: contract matrix проверяет distinct budgets, authority,
+required markers, exclusions и rendered argv для всех режимов без Qwen launch;
+assist, guarded recon/protocol и capability-smoke adapters используют registry.
+Protocol compatibility child сверяет входной argv с тем же renderer, поэтому
+в нём нет отдельной копии protocol limits. Protocol, recon и seal остаются
+разными contracts. Полный suite после этого изменения `154/154`, PowerShell
+parser и plugin validator проходят.

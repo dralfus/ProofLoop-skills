@@ -8,32 +8,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-function Get-TerminalResultEvent {
-    param([Parameter(Mandatory)] [object]$ParsedOutput)
-
-    [object[]]$events = @($ParsedOutput)
-    if ($events.Count -eq 0) {
-        return $null
-    }
-
-    $terminalEvent = $events[$events.Count - 1]
-    if ($terminalEvent -isnot [pscustomobject]) {
-        return $null
-    }
-    $typeProperty = $terminalEvent.PSObject.Properties['type']
-    if ($null -eq $typeProperty -or [string]$typeProperty.Value -ne 'result') {
-        return $null
-    }
-    $isErrorProperty = $terminalEvent.PSObject.Properties['is_error']
-    $subtypeProperty = $terminalEvent.PSObject.Properties['subtype']
-    if ($null -eq $isErrorProperty -or $isErrorProperty.Value -isnot [bool] -or
-        [bool]$isErrorProperty.Value -or $null -eq $subtypeProperty -or
-        [string]$subtypeProperty.Value -ne 'success') {
-        return $null
-    }
-    return $terminalEvent
-}
-
 $CapturePath = Join-Path $CaptureDirectory $RunId
 $stdoutPath = Join-Path $CapturePath 'stdout.json'
 $stderrPath = Join-Path $CapturePath 'stderr.txt'
@@ -51,13 +25,12 @@ try {
     $terminalOutput = $stdout | ConvertFrom-Json -ErrorAction Stop
     if ($PatchSealReceiptPath) {
         if (-not (Test-Path -LiteralPath $PatchSealReceiptPath)) { throw 'Patch seal receipt is unavailable.' }
-        $terminalEvent = Get-TerminalResultEvent -ParsedOutput $terminalOutput
-        $structuredResultProperty = if ($null -eq $terminalEvent) { $null } else { $terminalEvent.PSObject.Properties['structured_result'] }
-        $manifest = if ($null -eq $structuredResultProperty) { $null } else { $structuredResultProperty.Value }
-        if ($manifest -isnot [pscustomobject]) {
+        $terminalProjection = python "$PSScriptRoot\qwen_terminal_projection.py" --extract-structured-result --input-file $stdoutPath | ConvertFrom-Json
+        if ($terminalProjection.status -ne 'TERMINAL_STRUCTURED_RESULT' -or $terminalProjection.structured_result -isnot [pscustomobject]) {
             @{ status = 'QWEN_UNUSABLE'; reason = 'MISSING_TERMINAL_PATCH_MANIFEST'; pid = $ProcessId } | ConvertTo-Json -Compress
             exit 0
         }
+        $manifest = $terminalProjection.structured_result
         $sealResult = python "$PSScriptRoot\qwen_assist.py" --validate-patch-seal-manifest ($manifest | ConvertTo-Json -Depth 32 -Compress) --patch-seal-receipt (Get-Content -Raw -LiteralPath $PatchSealReceiptPath) | ConvertFrom-Json
         if ($sealResult.status -eq 'SEALED_CANDIDATE') {
             @{ status = 'SEALED_CANDIDATE'; pid = $ProcessId } | ConvertTo-Json -Compress

@@ -20,7 +20,9 @@ JSON Schema, Markdown.
 
 - Qwen remains an external bounded worker; it receives no acceptance authority.
 - The ticket-wide cap remains seven Qwen calls; seal consumes one call.
-- Seal is available once only after `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`.
+- Seal is available once only after `STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`;
+  `COLLECTOR_PROJECTION_FAILED` is allowed only for an independently observed
+  bounded candidate whose collector could not project the terminal envelope.
 - Seal always uses Qwen CLI `plan`, `--bare`, no `--safe-mode`, patch schema
   and read-only exclusions (`Agent,edit,notebook_edit,run_shell_command`).
 - Controller may validate and compare receipts but may not synthesize a manifest.
@@ -33,9 +35,9 @@ JSON Schema, Markdown.
 
 - A forged receipt with a nonzero targeted exit code must be rejected before Qwen starts.
 - A receipt with three files, 201 lines, nonempty Git operations or a full-suite flag must be rejected.
-- A seal request after any yolo reason other than the missing-structured-output turn-limit reason must be rejected.
+- A seal request after any yolo reason other than the missing-structured-output turn-limit reason or the independently observed collector-projection failure must be rejected.
 - A schema-valid Qwen manifest with a different file, line count or test command must not be sealed.
-- `seal` must never reach Qwen CLI as an approval mode; the child command must contain `plan` and the read-only exclusions.
+- `seal` must never reach Qwen CLI as an approval mode; the child command must contain `plan`, the read-only exclusions and an empty MCP config.
 
 ---
 

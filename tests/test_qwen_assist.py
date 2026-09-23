@@ -50,6 +50,7 @@ class QwenAssistTest(unittest.TestCase):
             "callback_boundary": "Low-level pointer callback",
             "acceptance_risk": "Stale evidence must fail closed.",
             "stop_reason": None,
+            "writes": [],
         }
 
     def test_capability_probe_accepts_new_version_without_version_field(self) -> None:
@@ -71,15 +72,9 @@ class QwenAssistTest(unittest.TestCase):
 
     def test_powershell_wrapper_requires_and_passes_bare_mode(self) -> None:
         wrapper = POWERSHELL_WRAPPER.read_text(encoding="utf-8")
-        required_markers = wrapper.split("$requiredMarkers = @(", 1)[1].split(")", 1)[0]
-
-        self.assertIn("'--bare'", required_markers)
-        self.assertIn("    '--bare' `", wrapper)
-
-        self.assertIn("$effectiveApprovalMode = if ($ApprovalMode -eq 'seal') { 'plan' } else { $ApprovalMode }", wrapper)
-        self.assertIn("$excludedTools = if ($effectiveApprovalMode -eq 'plan')", wrapper)
-        self.assertIn("'Agent,edit,notebook_edit,run_shell_command'", wrapper)
-        self.assertIn("else { 'Agent,run_shell_command' }", wrapper)
+        self.assertIn("qwen_invocation_contract.py", wrapper)
+        self.assertIn("$requiredMarkers = @($invocationContract.required_markers)", wrapper)
+        self.assertIn("$excludedTools = [string]$invocationContract.exclude_tools", wrapper)
 
 
         self.assertIn("[string]$AuthType", wrapper)
@@ -99,12 +94,9 @@ class QwenAssistTest(unittest.TestCase):
 
         self.assertIn("ValidateSet('plan', 'yolo', 'seal')", wrapper)
         self.assertIn("[string]$PatchSealReceiptPath", wrapper)
-        self.assertIn("$effectiveApprovalMode = if ($ApprovalMode -eq 'seal') { 'plan' } else { $ApprovalMode }", wrapper)
         self.assertIn("--validate-patch-seal-receipt", wrapper)
-        self.assertIn("'Agent,edit,notebook_edit,run_shell_command'", wrapper)
-        self.assertIn("$maxToolCalls = if ($ApprovalMode -eq 'seal') { '1' } else { '20' }", wrapper)
-        self.assertIn("$maxSessionTurns = if ($ApprovalMode -eq 'seal') { '12' } else { '12' }", wrapper)
-        self.assertIn("$maxWallTime = if ($ApprovalMode -eq 'seal') { '300s' } else { '10m' }", wrapper)
+        self.assertIn("$registryMode = if ($ApprovalMode -eq 'seal') { 'seal' }", wrapper)
+        self.assertIn("$mcpArgs = if ($invocationContract.mcp_config)", wrapper)
         self.assertIn("Call structured_output exactly once", wrapper)
         self.assertIn("Do not inspect or edit code, use shell/network, or create subagents.", wrapper)
 

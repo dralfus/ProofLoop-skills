@@ -130,6 +130,22 @@ session identity даёт `BLOCKED_CAPABILITY`; инерционный resume з
 pure policy seam: он возвращает raw-free decision и ledger projection, но сам не
 запускает Qwen, Implementer или acceptance.
 
+Перед child dispatch adapter вызывает общий pure
+`scripts/qwen_guard_policy.py` с projected settings, capabilities, worktree и
+receipt facts. Только `QWEN_GUARD_READY` разрешает native Qwen; protocol и
+recon сохраняют разные budgets/authority flags, а stale receipt, fixed-point
+drift, loop detection и terminal stop блокируются fail-closed.
+
+Mode-specific argv и capability markers берутся из pure registry
+`scripts/qwen_invocation_contract.py`. `assist`, `native_recon`, `protocol`,
+`seal` и `capability_smoke` сохраняют отдельные budgets/exclusions и не
+объединяются в один неразличимый dispatch contract.
+
+Mode-specific argv и capability markers берутся из pure registry
+`scripts/qwen_invocation_contract.py`. `assist`, `native_recon`, `protocol`,
+`seal` и `capability_smoke` сохраняют отдельные budgets/exclusions и не
+объединяются в один неразличимый dispatch contract.
+
 ### Native read-only recon
 
 This is the native read-only recon boundary, separate from the protocol.
