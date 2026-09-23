@@ -38,3 +38,26 @@ no `SEALED_CANDIDATE` was created. Auth/forbidden and transport classifiers
 were false for the terminal captures. This is a terminal Qwen CLI/provider
 structured-output limitation after three changed bounded packets, not a
 collector or candidate-scope failure; no further blind retry was made.
+
+## Follow-up diagnosis and E2E seal, 2026-09-23
+
+The red-capable differential loop isolated two independent failures:
+
+1. The same packet through explicit `qwen.cmd` still ended with `exit=53`,
+   empty stdout and `FatalTurnLimitedError`; the entrypoint and collector were
+   not the cause. A simple smoke schema succeeded, while the patch schema
+   repeatedly exhausted turns before a structured call.
+2. A normal launch with the old Qwen worktree slug was rejected before model
+   execution because `worktree-qwen-patch-ticket-314` already existed. The
+   existing branch/worktree was preserved; a fresh slug was used instead.
+
+The provider-facing patch schema was reduced to required fields plus basic JSON
+types. Strict bounds (`const`, min/max constraints and union types) remain
+enforced by `qwen_assist.py` when comparing the manifest with the independent
+`PATCH_SEAL_RECEIPT`; they are no longer sent as model-generation constraints.
+
+Fresh bounded seal launch `cbffea5e84ed421cb1566e61b7cd4485` used
+`12 turns / 1 structured_output call / 300s / depth1`, a fresh slug and fresh
+reservation identity. The capture reader returned `SEALED_CANDIDATE`. No
+transfer, commit, acceptance or product implementation followed. This is the
+first end-to-end proof of the Qwen manifest-only seal path.

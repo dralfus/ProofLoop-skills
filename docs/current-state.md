@@ -227,10 +227,15 @@ JSON, singleton `.Count` и пустого stdout; launch
 создан. Изменённая allowlist-причина `COLLECTOR_PROJECTION_FAILED` не
 подменяет фактический terminal outcome Qwen и не даёт transfer или acceptance.
 
-После диагностики выполнены ещё три fresh bounded packet с изменённым scope:
-`4/0/180s` дал structured JSON error envelope,
-`4/1/180s` с explicit `structured_output` дал тот же structured-output
-failure, а `12/1/300s` снова завершился `FatalTurnLimitedError` с пустым
-stdout. Auth/transport не были причиной. Поэтому E2E `SEALED_CANDIDATE` не
-доказан; дальнейший blind retry остановлен как внешний Qwen CLI/provider
-limitation. Collector и локальные gates исправлены и проверены.
+После этой серии диагностика разделила две причины. При простом smoke-schema
+Qwen возвращал terminal structured result, а patch-schema исчерпывал turns до
+его вызова. Provider-facing patch-schema упрощена до обязательных полей и
+базовых JSON-типов; строгие scope/test/Git ограничения по-прежнему проверяет
+host-side `qwen_assist.py`. Отдельный launch со старым Qwen worktree slug был
+остановлен до model execution из-за уже существующей ветки; существующий
+worktree сохранён, для доказательства выбран fresh slug.
+
+Fresh bounded seal `cbffea5e84ed421cb1566e61b7cd4485` (`12/1/300s/depth1`)
+вернул через capture reader `SEALED_CANDIDATE`. Это доказывает E2E
+manifest-only Qwen seal path; transfer, acceptance и product implementation
+не выполнялись. Collector и локальные gates проверены.

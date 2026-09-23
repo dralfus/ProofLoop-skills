@@ -15,6 +15,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPOSITORY_ROOT / "scripts" / "qwen_assist.py"
 SPEC = importlib.util.spec_from_file_location("qwen_assist", MODULE_PATH)
 POWERSHELL_WRAPPER = REPOSITORY_ROOT / "scripts" / "invoke_qwen_assist.ps1"
+PATCH_SCHEMA = REPOSITORY_ROOT / "plugins" / "agentic-development-workflow" / "skills" / "finish-ticket" / "references" / "qwen-assist-patch.schema.json"
 assert SPEC and SPEC.loader
 QWEN_ASSIST = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(QWEN_ASSIST)
@@ -106,6 +107,40 @@ class QwenAssistTest(unittest.TestCase):
         self.assertIn("$maxWallTime = if ($ApprovalMode -eq 'seal') { '300s' } else { '10m' }", wrapper)
         self.assertIn("Call structured_output exactly once", wrapper)
         self.assertIn("Do not inspect or edit code, use shell/network, or create subagents.", wrapper)
+
+    def test_patch_schema_uses_provider_friendly_shape_constraints(self) -> None:
+        schema = json.loads(PATCH_SCHEMA.read_text(encoding="utf-8"))
+
+        self.assertEqual(schema["type"], "object")
+        self.assertIs(schema["additionalProperties"], False)
+        self.assertEqual(
+            set(schema["required"]),
+            {
+                "successful_recon",
+                "files",
+                "changed_lines",
+                "targeted_tests",
+                "git_operations",
+                "full_suite",
+            },
+        )
+        self.assertEqual(
+            {name: schema["properties"][name]["type"] for name in schema["required"]},
+            {
+                "successful_recon": "boolean",
+                "files": "array",
+                "changed_lines": "integer",
+                "targeted_tests": "array",
+                "git_operations": "array",
+                "full_suite": "boolean",
+            },
+        )
+        for property_schema in schema["properties"].values():
+            self.assertNotIn("const", property_schema)
+            self.assertNotIn("minItems", property_schema)
+            self.assertNotIn("maxItems", property_schema)
+            self.assertNotIn("minLength", property_schema)
+            self.assertFalse(isinstance(property_schema.get("type"), list))
 
     def test_recon_runner_builds_read_only_bounded_command_and_rejects_bad_output(self) -> None:
         runner = Mock(return_value=(0, json.dumps(self.recon_report()), ""))

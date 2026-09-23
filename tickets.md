@@ -268,11 +268,19 @@ Disposable candidate `qwen-patch-ticket-314` retained one test-only file with
 manifest. No retry, transfer or acceptance followed; see
 `docs/experiments/qwen-manifest-only-collector-failure-2026-09-22.md`.
 
-Follow-up diagnostics used fresh bounded packets `4/0/180s`, `4/1/180s` with
-explicit `structured_output`, and `12/1/300s`; all ended without a terminal
-patch manifest (`structured_output_missing` or `FatalTurnLimitedError`). This
-is now classified as an external Qwen CLI/provider limitation. E2E
-`SEALED_CANDIDATE` remains NOT PROVEN; no further blind retry was made.
+Follow-up diagnosis isolated an over-constrained provider-facing patch schema:
+the simple smoke schema succeeded, while the patch schema exhausted turns
+before `structured_output`. The schema now carries only required fields and
+basic JSON types; strict scope/test/Git checks remain host-side. One stale
+Qwen-managed worktree slug also failed preflight because its branch already
+existed; the existing worktree was preserved and a fresh slug selected.
+
+Fresh bounded seal `cbffea5e84ed421cb1566e61b7cd4485` used
+`12 turns / 1 structured_output / 300s / depth1` and returned
+`SEALED_CANDIDATE` through the capture reader. This proves the E2E
+manifest-only seal path only; no transfer, acceptance or product
+implementation was performed. See
+`docs/experiments/qwen-manifest-only-collector-failure-2026-09-22.md`.
 
 ## 15. Условный `MINIMAL_SOLUTION_CHECK` для ordinary non-Qwen ticket
 

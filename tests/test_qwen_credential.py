@@ -233,7 +233,7 @@ class QwenCredentialTest(unittest.TestCase):
         )
 
 
-    def test_patch_candidate_schema_matches_the_bounded_candidate_contract(self) -> None:
+    def test_patch_candidate_schema_uses_provider_friendly_shape(self) -> None:
         self.assertTrue(PATCH_SCHEMA.is_file())
         schema = json.loads(PATCH_SCHEMA.read_text(encoding="utf-8"))
 
@@ -250,11 +250,23 @@ class QwenCredentialTest(unittest.TestCase):
                 "full_suite",
             },
         )
-        self.assertEqual(schema["properties"]["files"]["maxItems"], 2)
-        self.assertEqual(schema["properties"]["changed_lines"]["maximum"], 200)
-        self.assertEqual(schema["properties"]["targeted_tests"]["maxItems"], 1)
-        self.assertEqual(schema["properties"]["git_operations"]["type"], "array")
-        self.assertEqual(schema["properties"]["git_operations"]["maxItems"], 0)
+        self.assertEqual(
+            {name: schema["properties"][name]["type"] for name in schema["required"]},
+            {
+                "successful_recon": "boolean",
+                "files": "array",
+                "changed_lines": "integer",
+                "targeted_tests": "array",
+                "git_operations": "array",
+                "full_suite": "boolean",
+            },
+        )
+        for property_schema in schema["properties"].values():
+            self.assertNotIn("const", property_schema)
+            self.assertNotIn("minItems", property_schema)
+            self.assertNotIn("maxItems", property_schema)
+            self.assertNotIn("minLength", property_schema)
+            self.assertFalse(isinstance(property_schema.get("type"), list))
 
     def test_patch_seal_documentation_contract(self) -> None:
         for document in (CANONICAL_LIFECYCLE, QWEN_REFERENCE, HUMAN_LIFECYCLE):

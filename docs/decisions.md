@@ -834,3 +834,25 @@ exclusion/guard contract. Новый packet получает отдельную 
 
 Критерий: live launch должен вернуть terminal schema-valid manifest, после
 чего capture reader и независимый validator выдают `SEALED_CANDIDATE`.
+
+## D039 — Provider-friendly schema для manifest-only seal
+
+Статус: принято и реализовано локально 2026-09-23; bounded E2E доказан.
+
+Наблюдаемый failure: smoke-schema давала terminal `structured_result`, но
+patch-schema с `const`, min/max constraints и union type неоднократно доходила
+до `FatalTurnLimitedError` без structured call. Явный `qwen.cmd` воспроизводил
+тот же результат, поэтому entrypoint, auth/transport и collector не были
+primary cause. Дополнительно штатный slug `qwen-patch-ticket-314` мог быть
+заблокирован уже существующей Qwen-managed веткой.
+
+Решение: provider-facing schema содержит только required поля, basic JSON types
+и `additionalProperties=false`; строгие ограничения остаются в
+`qwen_assist.py` и independently observed `PATCH_SEAL_RECEIPT`. Повторное
+использование Qwen worktree slug не удаляет существующие ветки: Controller
+выбирает новый bounded slug после raw-free preflight failure.
+
+Измеримый результат: regression test фиксирует provider-friendly shape; fresh
+launch `cbffea5e84ed421cb1566e61b7cd4485` (`12/1/300s/depth1`) вернул через
+capture reader `SEALED_CANDIDATE`. Transfer, acceptance и product
+implementation не выполнялись.
