@@ -4,9 +4,13 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** implemented locally; full live Qwen `$finish-ticket` pilot pending.
 
-- [ ] Controller использует явный runtime adapter contract для capability preflight, model identity, role dispatch/continuation, tool policy и observed usage.
-- [ ] Auto-selection сохраняет действующий adaptive Codex profile и его model/budget policy.
-- [ ] Runtime без обязательных capabilities завершается `BLOCKED_CAPABILITY` без self-review или предполагаемого provider fallback.
-- [ ] Контракт и profile selection проверены внешними lifecycle fixtures; текущий Codex сценарий остаётся совместимым.
+- [x] Controller использует явный runtime adapter contract для capability preflight, model identity, role dispatch/continuation, tool policy и observed usage.
+- [x] Auto-selection сохраняет действующий adaptive Codex profile и его model/budget policy.
+- [x] Runtime без обязательных capabilities завершается `BLOCKED_CAPABILITY` без self-review или предполагаемого provider fallback.
+- [x] Контракт и profile selection проверены lifecycle fixtures; текущий Codex сценарий остаётся совместимым.
+
+Evidence: canonical lifecycle, `scripts/validate_plugin.py`, profile fixtures
+and end-to-end policy fixtures. Fixture coverage is local contract evidence;
+it does not claim a live Qwen role run.

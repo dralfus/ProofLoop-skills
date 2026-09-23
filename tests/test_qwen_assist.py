@@ -274,6 +274,33 @@ class QwenAssistTest(unittest.TestCase):
             {"status": "QWEN_UNUSABLE", "reason": "QWEN_BUDGET_EXHAUSTED"},
         )
 
+    def test_ledger_budget_is_shared_across_invocation_modes(self) -> None:
+        modes = ["recon", "candidate", "recon", "seal", "candidate", "recon", "seal"]
+        ledger = [
+            {
+                "mode": mode,
+                "root_cause": f"cause-{index}",
+                "progress": True,
+                "hypothesis": f"hypothesis-{index}",
+                "scope": f"scope-{index}",
+            }
+            for index, mode in enumerate(modes)
+        ]
+
+        self.assertEqual(
+            QWEN_ASSIST.next_qwen_attempt(
+                ledger,
+                {
+                    "mode": "candidate",
+                    "root_cause": "cause-8",
+                    "progress": True,
+                    "hypothesis": "new hypothesis",
+                    "scope": "new scope",
+                },
+            ),
+            {"status": "QWEN_UNUSABLE", "reason": "QWEN_BUDGET_EXHAUSTED"},
+        )
+
     def test_ledger_requires_a_changed_retry_packet(self) -> None:
         previous = {"root_cause": "first", "progress": True, "hypothesis": "same", "scope": "same"}
         self.assertEqual(

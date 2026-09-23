@@ -4,9 +4,13 @@
 
 **Blocked by:** 01 — Runtime adapter contract и совместимость Codex-профиля.
 
-**Status:** ready-for-agent
+**Status:** implemented locally; live role capability attestation pending.
 
-- [ ] Qwen profile проверяет runtime version, configured single-model identity, fresh named subagent, continuation Implementer, read-only Reviewer policy и executable verification command.
-- [ ] Все роли Qwen используют одну подтверждённую model identity; неявная смена provider или модели блокируется.
-- [ ] Reviewer создаётся как fresh named read-only role с отдельным контекстом; fork и write-capable review не дают independent acceptance evidence.
-- [ ] Отсутствующая capability приводит к `BLOCKED_CAPABILITY`; успешный preflight содержит наблюдаемую конфигурацию runtime и доступное usage-evidence.
+- [x] Qwen profile проверяет runtime version, configured single-model identity, fresh named subagent, continuation Implementer, read-only Reviewer policy и executable verification command.
+- [x] Все роли Qwen должны использовать одну declared model identity; неявная смена provider или модели блокируется.
+- [x] Reviewer policy требует fresh named read-only role; fork и write-capable review не дают independent acceptance evidence.
+- [x] Отсутствующая capability приводит к `BLOCKED_CAPABILITY`; preflight сохраняет доступное usage-evidence и честный `NOT_AVAILABLE`.
+
+Evidence: profile validator and missing/malformed-capability fixtures cover the
+fail-closed contract. Whether the installed Qwen runtime actually satisfies
+these role capabilities remains unverified until the full live pilot.

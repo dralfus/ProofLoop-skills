@@ -25,7 +25,7 @@ codex plugin add agentic-development-workflow@personal
 Для обновления pull обновлённый commit и повторите `codex plugin add`; после
 обновления откройте новый Codex task, чтобы он загрузил новую версию skill.
 
-## Установка и запуск в Qwen Code v0.22.2
+## Установка и запуск в Qwen Code
 
 Из корня того же clone выполните:
 
@@ -43,8 +43,11 @@ skill discoverable и добавляет named agent `finish-ticket-controller`;
 ```
 
 Обновление локально установленного extension требует `qwen extensions update
-proofloop-skills`. Полная процедура первого real pilot и его текущий статус
-`NOT_RUN` описаны в `experiments/qwen-code-v0222-pilot.md`.
+proofloop-skills`. Требуемые возможности проверяются preflight; версия CLI не
+является allow-list. Полная процедура native role-lifecycle pilot и его статус
+`NOT_RUN` описаны в `experiments/qwen-code-v0222-pilot.md`. Владелец подтвердил,
+что CLI установлен и отвечает; полный `$finish-ticket` pilot с несколькими
+repair candidates ещё не выполнялся.
 
 ### Guarded native Qwen launch
 

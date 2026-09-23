@@ -14,10 +14,13 @@ Default-модель используется без fallback.
 
 **Status:** done
 
-- [ ] Capability probe не зависит от version string Qwen.
-- [ ] Missing capability возвращает `BLOCKED_CAPABILITY` до worker execution.
-- [ ] Runner создаёт один bounded non-interactive invocation и валидирует
+- [x] Capability probe не зависит от version string Qwen.
+- [x] Missing capability возвращает `BLOCKED_CAPABILITY` до worker execution.
+- [x] Runner создаёт один bounded non-interactive invocation и валидирует
   terminal JSON.
+
+Evidence: capability and pre-dispatch tests, bounded invocation contract, and
+terminal projection tests pass in the focused Qwen suite.
 
 ## 2. Read-only `QWEN_RECON_REPORT`
 
@@ -30,9 +33,13 @@ state owner, callback boundary и одним acceptance risk. Worker не име
 
 **Status:** done
 
-- [ ] Schema принимает только `EVIDENCE_FOUND`, `BLOCKED` или `QWEN_UNUSABLE`.
-- [ ] Успех требует полного набора проверяемых полей и отсутствия writes.
-- [ ] Невалидный report не становится evidence для Controller.
+- [x] Schema принимает только `EVIDENCE_FOUND`, `BLOCKED` или `QWEN_UNUSABLE`.
+- [x] Успех требует полного набора проверяемых полей и отсутствия writes.
+- [x] Невалидный report не становится evidence для Controller.
+
+Evidence: `ReconReportContract` enforces the wire semantics and shared Python/
+PowerShell contract tests cover malformed, incomplete, baseline-mismatch and
+write reports.
 
 ## 3. Health ledger и обезличенные Qwen-метрики
 
@@ -45,9 +52,16 @@ state owner, callback boundary и одним acceptance risk. Worker не име
 
 **Status:** done
 
-- [ ] Лимит в семь распространяется на все режимы Qwen одного ticket.
-- [ ] Повтор требует изменённого scope, criterion, RED-command или hypothesis.
-- [ ] Central store не получает исходный код, пути или raw findings.
+- [x] Лимит в семь распространяется на все режимы Qwen одного ticket через
+  общий Controller ledger, не зависящий от invocation mode.
+- [x] Повтор требует изменённого scope, criterion, RED-command или hypothesis.
+- [x] Central store не получает исходный код, пути или raw findings.
+
+Evidence: the mode-agnostic `next_qwen_attempt` policy enforces the shared
+seven-entry budget, changed-packet requirement, repeated-root and two
+non-progress stops; metrics serialization uses an explicit allowlist. Focused
+ledger and metrics tests pass. Controller supplies the same ticket ledger to
+each mode; this is a policy contract, not an automatic cross-process journal.
 
 ## 4. Read-only live-pilot на ticket 314
 
@@ -59,33 +73,36 @@ ticket 355. Codex может подтвердить report и сохранить
 **Blocked by:** 1. Capability-driven Qwen runner; 2. Read-only
 `QWEN_RECON_REPORT`; 3. Health ledger и обезличенные Qwen-метрики.
 
-**Status:** blocked-by-evidence — pilot завершился `QWEN_UNUSABLE`:
-`STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`; см.
-`docs/experiments/qwen-assist-ticket-314-pilot.md`.
+**Status:** done — bounded read-only bridge pilot succeeded after the initial
+wide-packet failures; this does not accept or implement ticket 314.
 
-**Current local status (2026-09-18):** benign schema-smoke is schema-valid with
-the configured `qwen38-flash-next` OpenAI-compatible route. The captured
-read-only recon returned exit `53` / `FatalTurnLimitedError` without terminal
-`structured_output`; see
-`docs/experiments/qwen-assist-ticket-314-captured-recon-2026-09-18.md`.
-The repeated root cause is `QWEN_UNUSABLE`, not Ticket 314 acceptance evidence.
-- [ ] Процедура явно отделяет успешный bridge-pilot от acceptance ticket 314.
-- [ ] Pilot фиксирует baseline, limits, terminal outcome и anonymized metrics.
-- [ ] Нет diff ticket 355, записей Qwen или тестовых side effects.
+Исторические широкие packets от 2026-09-08 и 2026-09-18 завершались
+`QWEN_UNUSABLE / STRUCTURED_OUTPUT_MISSING_AT_TURN_LIMIT`; они остаются
+валидными failure evidence для тех запусков. Последующий narrowed one-file
+packet вернул schema-valid `EVIDENCE_FOUND` за три turns на clean isolated
+baseline `c7ad67ce9bcfa21526d56b9a7eca5f3b82ca673a`; Controller проверил три
+locatable facts, пустой `writes` и отсутствие worktree diff. Это подтверждает
+управляемый read-only bridge pilot. Ticket 314 не реализовывался и не принимался.
+Поздний live recon `814298d37ba7487c83c3313b72b1f936` отдельно доказал native
+read-only recon contract; см. `docs/current-state.md` и D043/D044.
+
+- [x] Процедура отделяет успешный bridge-pilot от acceptance ticket 314.
+- [x] Pilot фиксирует baseline, limits, terminal outcome и anonymized metrics.
+- [x] Нет diff ticket 355, записей Qwen или тестовых side effects.
 
 ## 5. `QWEN_PATCH_CANDIDATE` с независимым переносом
-**Update (2026-09-18, supersedes status above):** Ticket 4 is done. A narrowed
+**Update (2026-09-18):** Ticket 4 is done. A narrowed
 one-file packet returned schema-valid `EVIDENCE_FOUND` in three turns from a
 clean isolated worktree at baseline `c7ad67ce9bcfa21526d56b9a7eca5f3b82ca673a`.
 Codex independently confirmed three locatable facts, empty `writes` and no
 worktree diff; the local metric contains only approved aggregate fields. This
 is bridge evidence, not Ticket 314 acceptance evidence.
 
-**Update for Ticket 5:** partial. Qwen produced an independently verified
+**Historical Ticket 5 failures:** Qwen produced an independently verified
 2-file/8-line candidate, but both write runs ended exit `53` without terminal
 patch manifest; the write-output branch remains `QWEN_UNUSABLE` and stops same-root retries.
 
-**Update (2026-09-19):** A new minimal, isolated manifest smoke narrowed the
+**Historical update (2026-09-19):** A minimal, isolated manifest smoke narrowed the
 failure: schema-valid `plan` recon completed in two turns, while `yolo` applied
 exactly one file/11-line test-only change and its targeted test passed, but
 again ended at the 12-turn limit with no terminal manifest. Thus the remaining
@@ -97,13 +114,15 @@ See `docs/experiments/qwen-assist-manifest-smoke-2026-09-19.md`.
 candidate diff в своей worktree. Codex independently проверяет candidate и сам
 переносит только одобренное изменение; Qwen не выполняет Git-интеграцию.
 
-**Blocked by:** 4. Read-only live-pilot на ticket 314.
+**Blocked by:** none for implementation; candidate transfer still needs an
+independent review and a bounded transfer-evidence run.
 
-**Status:** implemented, activation blocked by ticket 4.
+**Status:** partial — bounded candidate and end-to-end manifest-only seal are
+proven; independent candidate transfer is not yet proven.
 
-- [ ] Candidate ограничен двумя файлами, 200 изменёнными строками и одним
+- [x] Candidate ограничен двумя файлами, 200 изменёнными строками и одним
   targeted test.
-- [ ] Qwen не может commit, merge, cherry-pick, push, full suite или acceptance.
+- [x] Qwen не может commit, merge, cherry-pick, push, full suite или acceptance.
 - [ ] Transfer требует independent Codex review и executable evidence.
 # Tickets: сходимость finish-ticket по урокам Ticket 355
 
@@ -278,17 +297,27 @@ existed; the existing worktree was preserved and a fresh slug selected.
 Fresh bounded seal `cbffea5e84ed421cb1566e61b7cd4485` used
 `12 turns / 1 structured_output / 300s / depth1` and returned
 `SEALED_CANDIDATE` through the capture reader. This proves the E2E
-manifest-only seal path only; no transfer, acceptance or product
-implementation was performed. See
+manifest-only seal path; no transfer, acceptance or product implementation was
+performed. This supersedes the earlier seal-output `QWEN_UNUSABLE` entries for
+the current implementation, while retaining them as historical run outcomes.
+See
 `docs/experiments/qwen-manifest-only-collector-failure-2026-09-22.md`.
 
 ## 15. Условный `MINIMAL_SOLUTION_CHECK` для ordinary non-Qwen ticket
 
-**Status:** implemented, local validation pending.
+**Status:** implemented; local validation complete. Effectiveness comparison
+remains pending until ten eligible ordinary tickets provide a sample.
 
 - [x] Check использует существующий packet и Reviewer без новой роли или команды.
 - [x] Qwen и тяжёлые ticket исключены; acceptance authority не ослаблена.
-- [x] Pilot измеряет diff, launches, repair/context, usage, scope drift и outcome.
+- [x] Metric contract фиксирует diff, launches, repair/context, usage, scope
+  drift и outcome для будущего effectiveness pilot.
+
+Local validation: `python scripts/validate_plugin.py
+plugins/agentic-development-workflow` and
+`python -m unittest tests.test_validate_plugin` (`68` tests, PASS). This
+validates the installed artifact and policy contract; it does not claim an
+effectiveness result before the ten-ticket sample.
 
 ## 16. Guarded launcher native Qwen Code
 

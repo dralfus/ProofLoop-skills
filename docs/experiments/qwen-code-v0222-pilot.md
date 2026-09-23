@@ -1,16 +1,21 @@
-# Qwen Code v0.22.2 pilot
+# Native Qwen Code `$finish-ticket` pilot
 
-Статус: `NOT_RUN`.
+Статус: `NOT_RUN` для полного native role-lifecycle pilot.
 
 Этот документ — воспроизводимая процедура реального pilot, а не
-синтетическое live evidence. На машине, где подготовлен репозиторий, Qwen CLI
-не найден: `QWEN_CLI=ABSENT`. Поэтому запуск ticket, model identity, role
-traces, команды и observed usage не подменяются вымышленными значениями.
+синтетическое live evidence. Владелец подтвердил, что Qwen CLI установлен и
+отвечает. Полный pilot с Implementer continuation, независимым Reviewer,
+Verifier и terminal verdict ещё не выполнялся. Предыдущее наблюдение
+`QWEN_CLI=ABSENT` относилось к более ранней проверке и не описывает текущую
+доступность CLI.
 
 ## Preconditions
 
-1. Установить Qwen Code **ровно `0.22.2`** и подтвердить `qwen --version`.
-2. Из корня этого репозитория установить extension: `qwen extensions install .`.
+1. Зафиксировать доступные capabilities установленного CLI через ProofLoop
+   capability preflight; версия сохраняется как evidence, но не служит
+   allow-list.
+2. Из корня этого репозитория установить или обновить extension:
+   `qwen extensions install .`.
 3. В Qwen открыть `/skills`, убедиться, что виден `finish-ticket`, и в
    `/agents manage` — `finish-ticket-controller`.
 4. Выбрать один обычный ticket с воспроизводимым RED command и безопасным
@@ -37,8 +42,8 @@ traces, команды и observed usage не подменяются вымыш�
 
 | Field | Observed value |
 | --- | --- |
-| Qwen CLI discovery | `QWEN_CLI=ABSENT` |
-| `qwen --version` | `NOT_RUN` |
+| Qwen CLI discovery | `AVAILABLE_PER_OWNER_REPORT`; not re-probed during this documentation update |
+| `qwen --version` | `0.24.3` per earlier owner report; not re-probed during this documentation update |
 | Extension installation | `NOT_RUN` |
 | Capability preflight | `NOT_RUN` |
 | Repair candidates | `NOT_RUN` |

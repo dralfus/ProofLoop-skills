@@ -72,7 +72,7 @@ Skill читает протокол из собственного глобаль
 Используй $audit-test-suite для измерительного аудита test suite этого проекта.
 ```
 
-## Qwen Code v0.22.2
+## Qwen Code
 
 Из корня того же clone установите нативное Qwen extension:
 
@@ -83,8 +83,9 @@ qwen extensions install .
 Затем запустите `/finish-ticket ticket <ID или путь>`. Qwen extension публикует
 тот же skill и единый canonical lifecycle, а не его копию. Перед role dispatch
 обязателен exact capability preflight; неподтверждённая capability означает
-`BLOCKED_CAPABILITY`. Процедура реального pilot и текущее честное состояние
-`NOT_RUN` находятся в `docs/experiments/qwen-code-v0222-pilot.md`.
+`BLOCKED_CAPABILITY`. Процедура полного native `$finish-ticket` pilot находится
+в `docs/experiments/qwen-code-v0222-pilot.md`. CLI доступен владельцу; полный
+role-lifecycle pilot пока не выполнялся.
 
 Для отдельного bounded анализа launcher поддерживает explicit native `recon`
 mode: clean fixed-point worktree, `qwen.cmd`, plan-mode tool exclusions,
