@@ -68,6 +68,7 @@ class QwenInvocationContractTest(unittest.TestCase):
         self.assertEqual(native_recon[native_recon.index("--max-session-turns") + 1], "3")
         self.assertEqual(native_recon[native_recon.index("--max-tool-calls") + 1], "6")
         self.assertIn("Agent,edit,notebook_edit,run_shell_command", native_recon)
+        self.assertNotIn("--no-thinking", native_recon)
 
         protocol = CONTRACT.render_argv("protocol", ticket="16")
         self.assertEqual(
@@ -102,6 +103,37 @@ class QwenInvocationContractTest(unittest.TestCase):
         self.assertEqual(CONTRACT.get_contract("assist")["limits"]["max_tool_calls"], 20)
         with self.assertRaises(ValueError):
             CONTRACT.render_argv("native_recon")
+
+    def test_ticket_18_mode_controls_are_explicit_and_do_not_set_sampling(self) -> None:
+        mode_contract = importlib.util.spec_from_file_location(
+            "qwen_mode_contract_fixture", REPOSITORY_ROOT / "scripts" / "qwen_mode_contract.py"
+        )
+        assert mode_contract and mode_contract.loader
+        modes = importlib.util.module_from_spec(mode_contract)
+        mode_contract.loader.exec_module(modes)
+
+        protocol = modes.get_mode_runtime_contract("protocol")
+        self.assertEqual(protocol["output_token_limit"], 8000)
+        self.assertEqual(protocol["process_environment"], {"QWEN_CODE_MAX_OUTPUT_TOKENS": "8000"})
+        self.assertEqual(protocol["thinking_policy"], "require_configured_reasoning")
+        self.assertEqual(protocol["packet_language"], "en")
+        self.assertEqual(protocol["response_language"], "ru")
+        self.assertFalse(any(name in protocol["process_environment"] for name in ("temperature", "top_p", "top_k")))
+
+        recon = modes.get_mode_runtime_contract("recon")
+        self.assertIsNone(recon["output_token_limit"])
+        self.assertEqual(recon["thinking_policy"], "inherit_configured_reasoning")
+        recon_ready = modes.evaluate_mode_preflight("recon", reasoning_effort="xhigh")
+        self.assertEqual(recon_ready["status"], "QWEN_MODE_READY")
+        self.assertEqual(recon_ready["thinking_policy"], "inherit_configured_reasoning")
+        blocked = modes.evaluate_mode_preflight("recon", reasoning_effort="none")
+        self.assertEqual(blocked["status"], "BLOCKED_CAPABILITY")
+        self.assertEqual(blocked["reason"], "RECON_THINKING_NOT_CONFIGURED")
+        ready = modes.evaluate_mode_preflight("protocol", reasoning_effort="xhigh")
+        self.assertEqual(ready["status"], "QWEN_MODE_READY")
+        self.assertEqual(ready["process_environment"], {"QWEN_CODE_MAX_OUTPUT_TOKENS": "8000"})
+        disabled = modes.evaluate_mode_preflight("protocol", reasoning_effort="none")
+        self.assertEqual(disabled["reason"], "PROTOCOL_THINKING_NOT_CONFIGURED")
 
 
 if __name__ == "__main__":

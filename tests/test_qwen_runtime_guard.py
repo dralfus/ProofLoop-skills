@@ -40,6 +40,48 @@ def create_clean_git_worktree(root: Path) -> None:
 
 
 class QwenRuntimeGuardTest(unittest.TestCase):
+    def test_protocol_applies_process_scoped_output_limit_and_restores_prior_value(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for process environment behavior")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fake_qwen = root / "fake-qwen.ps1"
+            observed = root / "observed.txt"
+            fake_qwen.write_text(
+                "[IO.File]::WriteAllText($env:QWEN_FAKE_OBSERVED, $env:QWEN_CODE_MAX_OUTPUT_TOKENS)\n",
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "QWEN_FAKE_OBSERVED": str(observed),
+                    "QWEN_CODE_MAX_OUTPUT_TOKENS": "prior-value",
+                    "QWEN_CLI_WRAPPER": str(CLI_COMPATIBILITY_CONSUMER),
+                    "QWEN_FAKE_CLI": str(fake_qwen),
+                    "QWEN_PROTOCOL_ARGS": json.dumps(
+                        [
+                            "--max-session-turns", "20", "--max-tool-calls", "20",
+                            "--max-wall-time", "30m", "--max-subagent-depth", "1",
+                            "--prompt", "/finish-ticket ticket 18",
+                        ]
+                    ),
+                }
+            )
+            result = subprocess.run(
+                [
+                    PWSH, "-NoProfile", "-Command",
+                    ". $env:QWEN_CLI_WRAPPER -Mode protocol -QwenCommand $env:QWEN_FAKE_CLI -QwenArgumentsJson $env:QWEN_PROTOCOL_ARGS; Write-Output ('restored=' + $env:QWEN_CODE_MAX_OUTPUT_TOKENS)",
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                env=environment,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(observed.read_text(encoding="utf-8"), "8000")
+            self.assertIn("restored=prior-value", result.stdout)
+
     def test_recon_schema_requires_terminal_outcome_fields(self) -> None:
         schema = json.loads(RECON_SCHEMA.read_text(encoding="utf-8"))
         self.assertIn("stop_reason", schema["required"])
@@ -68,7 +110,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                         "model": {
                             "skipLoopDetection": False,
                             "maxToolCallsPerTurn": 20,
-                            "maxSubagentDepth": 1,
+                            "maxSubagentDepth": 1, "reasoningEffort": "xhigh",
                         },
                         "skipLoopDetection": True,
                         "maxToolCallsPerTurn": 1,
@@ -131,7 +173,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                         "model": {
                             "skipLoopDetection": False,
                             "maxToolCallsPerTurn": 20,
-                            "maxSubagentDepth": 1,
+                            "maxSubagentDepth": 1, "reasoningEffort": "xhigh",
                         },
                         "skipLoopDetection": True,
                         "maxToolCallsPerTurn": 1,
@@ -146,7 +188,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             )
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --worktree --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands plan'; exit 0 }\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --worktree --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
                 "Write-Output '[{\"type\":\"result\",\"is_error\":true,\"errorType\":\"structured_output_missing\",\"errorMessage\":\"model did not produce structured output\"}]'\n"
                 "exit 1\n",
                 encoding="utf-8",
@@ -201,7 +243,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             create_clean_git_worktree(recon_worktree)
             settings_path.write_text(
                 json.dumps(
-                    {"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1}}
+                    {"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}
                 ),
                 encoding="utf-8",
             )
@@ -211,7 +253,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             )
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands plan'; exit 0 }\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
                 "Write-Output '[{\"type\":\"assistant\",\"message\":{\"content\":[]}}, {\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"error\":{\"message\":\"model did not produce structured output\"}}]'\n"
                 "exit 1\n",
                 encoding="utf-8",
@@ -270,7 +312,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             create_clean_git_worktree(recon_worktree)
             settings_path.write_text(
                 json.dumps(
-                    {"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1}}
+                    {"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}
                 ),
                 encoding="utf-8",
             )
@@ -280,7 +322,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             )
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands plan'; exit 0 }\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
                 "Write-Output '[{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"error\":{\"message\":\"HTTP 403 Forbidden\"}}]'\n"
                 "exit 1\n",
                 encoding="utf-8",
@@ -332,7 +374,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             create_clean_git_worktree(recon_worktree)
             settings_path.write_text(
                 json.dumps(
-                    {"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1}}
+                    {"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}
                 ),
                 encoding="utf-8",
             )
@@ -342,7 +384,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             )
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands plan'; exit 0 }\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
                 "cmd.exe /c 'echo {\"is_error\":true,\"subtype\":\"error_during_execution\",\"error\":{\"message\":\"HTTP 403 Forbidden\"}} 1>&2'\n"
                 "exit 1\n",
                 encoding="utf-8",
@@ -401,7 +443,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             create_clean_git_worktree(recon_worktree)
             settings_path.write_text(
                 json.dumps(
-                    {"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1}}
+                    {"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}
                 ),
                 encoding="utf-8",
             )
@@ -431,7 +473,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             }
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands plan'; exit 0 }\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
                 "Write-Output $env:QWEN_FAKE_OUTPUT\n"
                 "exit -1073740791\n",
                 encoding="utf-8",
@@ -489,7 +531,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             create_clean_git_worktree(recon_worktree)
             settings_path.write_text(
                 json.dumps(
-                    {"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1}}
+                    {"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}
                 ),
                 encoding="utf-8",
             )
@@ -499,7 +541,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             )
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --worktree --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands plan'; exit 0 }\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --worktree --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
                 "Write-Error 'Model produced plain text instead of calling the structured_output tool.' -ErrorAction Continue\n"
                 "exit 1\n",
                 encoding="utf-8",
@@ -574,7 +616,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                         "model": {
                             "skipLoopDetection": False,
                             "maxToolCallsPerTurn": 20,
-                            "maxSubagentDepth": 1,
+                            "maxSubagentDepth": 1, "reasoningEffort": "xhigh",
                         }
                     }
                 ),
@@ -625,7 +667,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             for case, extra_arguments, expected_reason in blocked_cases:
                 if case == "loop-detection":
                     settings_path.write_text(
-                        json.dumps({"model": {"skipLoopDetection": True, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1}}),
+                        json.dumps({"model": {"skipLoopDetection": True, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}),
                         encoding="utf-8",
                     )
                 elif case == "nesting":
@@ -635,13 +677,20 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                     )
                 else:
                     settings_path.write_text(
-                        json.dumps({"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1}}),
+                        json.dumps({"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}),
                         encoding="utf-8",
                     )
                 with self.subTest(case=case):
                     result = launch(*extra_arguments)
                     self.assertEqual(result.returncode, 3)
-                    self.assertEqual(json.loads(result.stdout), {"status": "BLOCKED_CAPABILITY", "reason": expected_reason})
+                    projection = json.loads(result.stdout)
+                    self.assertEqual(projection["status"], "BLOCKED_CAPABILITY")
+                    self.assertEqual(projection["reason"], expected_reason)
+                    self.assertEqual(projection["mode"], "protocol")
+                    self.assertEqual(projection["terminal_reason"], expected_reason)
+                    self.assertEqual(projection["turn_count"], 0)
+                    self.assertEqual(projection["tool_call_count"], 0)
+                    self.assertGreaterEqual(projection["duration_ms"], 0)
                     self.assertFalse(reached_path.exists())
 
             extension_root.mkdir()
@@ -653,6 +702,11 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             status = json.loads(result.stdout)
             self.assertEqual(status["status"], "QWEN_SESSION_GUARD_READY")
+            self.assertEqual(status["mode"], "protocol")
+            self.assertEqual(status["terminal_reason"], "QWEN_SESSION_GUARD_READY")
+            self.assertEqual(status["turn_count"], "NOT_AVAILABLE")
+            self.assertEqual(status["tool_call_count"], "NOT_AVAILABLE")
+            self.assertGreaterEqual(status["duration_ms"], 0)
             self.assertNotIn(str(temporary_root), result.stdout)
             self.assertNotIn("SECRET", result.stdout.upper())
             self.assertTrue(reached_path.is_file())
@@ -706,7 +760,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                         "model": {
                             "skipLoopDetection": False,
                             "maxToolCallsPerTurn": 20,
-                            "maxSubagentDepth": 1,
+                            "maxSubagentDepth": 1, "reasoningEffort": "xhigh",
                         }
                     }
                 ),
@@ -749,10 +803,14 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 3)
-            self.assertEqual(
-                json.loads(result.stdout),
-                {"status": "BLOCKED_CAPABILITY", "reason": "QWEN_CLI_CAPABILITY_MISSING"},
-            )
+            projection = json.loads(result.stdout)
+            self.assertEqual(projection["status"], "BLOCKED_CAPABILITY")
+            self.assertEqual(projection["reason"], "QWEN_CLI_CAPABILITY_MISSING")
+            self.assertEqual(projection["mode"], "protocol")
+            self.assertEqual(projection["terminal_reason"], "QWEN_CLI_CAPABILITY_MISSING")
+            self.assertEqual(projection["turn_count"], 0)
+            self.assertEqual(projection["tool_call_count"], 0)
+            self.assertGreaterEqual(projection["duration_ms"], 0)
             self.assertFalse(reached_path.exists())
 
     def test_qwen_cli_compatibility_consumer_allows_only_the_operator_argv_contract(self) -> None:
@@ -840,7 +898,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                         "model": {
                             "skipLoopDetection": False,
                             "maxToolCallsPerTurn": 20,
-                            "maxSubagentDepth": 1,
+                            "maxSubagentDepth": 1, "reasoningEffort": "xhigh",
                         }
                     }
                 ),
@@ -980,7 +1038,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                         "model": {
                             "skipLoopDetection": False,
                             "maxToolCallsPerTurn": 20,
-                            "maxSubagentDepth": 1,
+                            "maxSubagentDepth": 1, "reasoningEffort": "xhigh",
                         }
                     }
                 ),
@@ -992,7 +1050,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             )
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands plan'; exit 0 }\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
                 "@{ cwd = (Get-Location).Path; arguments = $Arguments } | ConvertTo-Json -Compress | Set-Content -LiteralPath $env:QWEN_FAKE_RUNTIME -Encoding utf8\n"
                 "@{ status = 'EVIDENCE_FOUND'; baseline = $env:QWEN_FAKE_BASELINE; facts = @(@{ file = 'README.md'; line = 1; fact = 'Fixture is clean.' }, @{ file = 'README.md'; line = 1; fact = 'No write capability is granted.' }, @{ file = 'README.md'; line = 1; fact = 'No acceptance path is present.' }); state_owner = 'fixture owner'; callback_boundary = 'none'; acceptance_risk = 'recon is not acceptance'; stop_reason = $null; writes = @() } | ConvertTo-Json -Compress\n"
                 "exit 0\n",
@@ -1058,7 +1116,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             create_clean_git_worktree(recon_worktree)
             (recon_worktree / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
             settings_path.write_text(
-                json.dumps({"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1}}),
+                json.dumps({"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}),
                 encoding="utf-8",
             )
             extension_root.mkdir()
@@ -1068,7 +1126,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
                 "[IO.File]::WriteAllText($env:QWEN_FAKE_REACHED, 'reached')\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --worktree --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands plan'; exit 0 }\n",
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --worktree --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n",
                 encoding="utf-8",
             )
             environment = os.environ.copy()
@@ -1084,16 +1142,17 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 3)
-            self.assertEqual(
-                json.loads(result.stdout),
-                {
-                    "status": "BLOCKED_CAPABILITY",
-                    "reason": "WORKTREE_NOT_CLEAN",
-                    "role_dispatch": False,
-                    "subagent_dispatch": False,
-                    "acceptance": False,
-                },
-            )
+            projection = json.loads(result.stdout)
+            self.assertEqual(projection["status"], "BLOCKED_CAPABILITY")
+            self.assertEqual(projection["reason"], "WORKTREE_NOT_CLEAN")
+            self.assertFalse(projection["role_dispatch"])
+            self.assertFalse(projection["subagent_dispatch"])
+            self.assertFalse(projection["acceptance"])
+            self.assertEqual(projection["mode"], "recon")
+            self.assertEqual(projection["terminal_reason"], "WORKTREE_NOT_CLEAN")
+            self.assertEqual(projection["turn_count"], 0)
+            self.assertEqual(projection["tool_call_count"], 0)
+            self.assertGreaterEqual(projection["duration_ms"], 0)
             self.assertFalse(reached_path.exists())
             self.assertFalse(receipt_directory.exists())
 
@@ -1110,7 +1169,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             reached_path = temporary_root / "reached.txt"
             create_clean_git_worktree(recon_worktree)
             settings_path.write_text(
-                json.dumps({"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1}}),
+                json.dumps({"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}),
                 encoding="utf-8",
             )
             extension_root.mkdir()
@@ -1119,7 +1178,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             )
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --worktree --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands plan'; exit 0 }\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --worktree --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
                 "[IO.File]::WriteAllText($env:QWEN_FAKE_REACHED, 'reached')\n",
                 encoding="utf-8",
             )

@@ -363,14 +363,27 @@ runtime loop без автоматического continuation.
 
 **Blocked by:** 16. Guarded launcher native Qwen Code; 17. Lifecycle gate и terminal stop guarded Qwen session.
 
-**Status:** ready-for-agent.
+**Status:** implementation follow-up complete locally; capability smoke and
+bounded recon pilot PASS; protocol pilot NOT_RUN.
 
-- [ ] `recon` использует малый budget без thinking; `protocol` включает
-  thinking и output limit не меньше 8000, не задавая sampling defaults.
-- [ ] Packet подаётся по-английски с требованием русского ответа; model name
+- [x] `recon` сохраняет малый budget `3 turns / 6 tools / 5m` и наследует
+  настроенный Qwen thinking/reasoning; ему не нужен CLI-переключатель
+  `--no-thinking`, настройки пользователя не меняются.
+- [x] `protocol` использует настроенный reasoning и process-scoped output limit
+  не ниже 8000, не задавая sampling defaults.
+- [x] Packet подаётся по-английски с требованием русского ответа; model name
   не становится version allow-list.
-- [ ] Fixtures и pilot публикуют raw-free guard outcome, terminal reason,
-  duration, mode и доступные turn/tool counters.
+- [x] Fixtures и bounded attempt публикуют raw-free guard outcome, terminal
+  reason, duration, mode и доступные turn/tool counters.
+
+Capability smoke: Qwen `0.24.4`, all 11 required CLI capabilities present,
+configured reasoning and ProofLoop extension present. Recon launch
+`3bdb60eef61442fdba7f73467cbba746` returned `QWEN_RECON_READY` with exact clean
+baseline `335ba1dc0364e7bb9ac0413925e1a1e8440cb760`, schema-valid structured
+report, `writes=false`, and `role_dispatch=false`, `subagent_dispatch=false`,
+`acceptance=false`. Protocol pilot remains NOT_RUN; the documented native
+`/finish-ticket` protocol pilot includes Implementer and acceptance roles,
+outside the currently bounded no-Implementer/no-acceptance scope.
 
 ## 19. Capability-based Qwen launcher compatibility
 

@@ -42,13 +42,14 @@ Verifier и terminal verdict ещё не выполнялся. Предыдущ�
 
 | Field | Observed value |
 | --- | --- |
-| Qwen CLI discovery | `AVAILABLE_PER_OWNER_REPORT`; not re-probed during this documentation update |
-| `qwen --version` | `0.24.3` per earlier owner report; not re-probed during this documentation update |
-| Extension installation | `NOT_RUN` |
-| Capability preflight | `NOT_RUN` |
+| Qwen CLI discovery | `AVAILABLE`; `qwen.cmd` resolved by the bounded capability smoke |
+| `qwen --version` | `0.24.4`, exit 0 |
+| Extension installation | Local `proofloop-skills` manifest present; native `/skills` and `/agents` discovery not independently verified in this run |
+| Capability preflight | `PASS`: 11/11 required recon CLI markers, configured reasoning present, exit 0 |
+| Recon pilot | `QWEN_RECON_READY`; launch `3bdb60eef61442fdba7f73467cbba746`, clean baseline `335ba1dc0364e7bb9ac0413925e1a1e8440cb760`, read-only and all dispatch/acceptance flags false |
 | Repair candidates | `NOT_RUN` |
 | Terminal verdict | `NOT_RUN` |
-| Runtime/model/role/command/usage trace | `NOT_RUN` |
+| Runtime/model/role/command/usage trace | Recon-only trace available; protocol role lifecycle, active server model attestation, and usage counters `NOT_RUN`/`NOT_AVAILABLE` |
 
 The JSON fixtures under `tests/fixtures/end-to-end/` are policy evidence only;
 they do not claim a live Qwen Code execution.

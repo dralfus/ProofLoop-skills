@@ -8,6 +8,9 @@ param(
 
     [string]$QwenArgumentsJson,
 
+    [ValidateRange(8000, 2147483647)]
+    [int]$OutputTokenLimit = 8000,
+
     [string]$Ticket,
 
     [string]$SchemaPath,
@@ -166,6 +169,10 @@ try {
     $previousApiKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY', 'Process')
     $previousBaseUrl = [Environment]::GetEnvironmentVariable('OPENAI_BASE_URL', 'Process')
     $previousModel = [Environment]::GetEnvironmentVariable('OPENAI_MODEL', 'Process')
+    $previousOutputLimit = [Environment]::GetEnvironmentVariable('QWEN_CODE_MAX_OUTPUT_TOKENS', 'Process')
+    if ($Mode -eq 'protocol') {
+        $env:QWEN_CODE_MAX_OUTPUT_TOKENS = [string]$OutputTokenLimit
+    }
     if ($Mode -eq 'recon') {
         $qwenCommandLeaf = Split-Path -Leaf $QwenCommand
         if ($qwenCommandLeaf -in @('qwen', 'qwen.cmd', 'qwen.exe')) {
@@ -207,6 +214,9 @@ finally {
         if ($null -eq $previousBaseUrl) { Remove-Item Env:OPENAI_BASE_URL -ErrorAction SilentlyContinue } else { $env:OPENAI_BASE_URL = $previousBaseUrl }
         if ($null -eq $previousModel) { Remove-Item Env:OPENAI_MODEL -ErrorAction SilentlyContinue } else { $env:OPENAI_MODEL = $previousModel }
         $credentialSecret = $null
+    }
+    if ($Mode -eq 'protocol') {
+        if ($null -eq $previousOutputLimit) { Remove-Item Env:QWEN_CODE_MAX_OUTPUT_TOKENS -ErrorAction SilentlyContinue } else { $env:QWEN_CODE_MAX_OUTPUT_TOKENS = $previousOutputLimit }
     }
 }
 

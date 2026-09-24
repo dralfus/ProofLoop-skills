@@ -171,8 +171,17 @@ repair-candidates, но не ограничивает сам процесс Qwen
 limits; Ticket 19 заменил version pin launcher capability path на capability и
 CLI compatibility checks. Ticket 17 добавил pure raw-free lifecycle gate для
 fresh receipt, terminal budget/loop/fingerprint stop и append-only continuation
-evidence; он не запускает role-agent или acceptance. Режимы Ticket 18 остаются
-отдельной незапущенной задачей; live role/acceptance evidence нет.
+evidence; он не запускает role-agent или acceptance. Ticket 18 локально
+реализует режимные contracts и raw-free pilot fields. По пересмотренному
+решению D046 `recon` сохраняет configured thinking, ограничиваясь малым
+runtime budget; implementation follow-up удалил obsolete `--no-thinking` gate
+из mode/argv/launcher contract и усилил инструкции Qwen по обязательному
+следованию установленному `/finish-ticket` skill. Capability smoke прошёл на
+Qwen 0.24.4; bounded pilot `3/6/5m/depth1` завершился `QWEN_RECON_READY` на
+clean baseline `335ba1dc0364e7bb9ac0413925e1a1e8440cb760`, с валидным
+structured output, `writes=false` и всеми dispatch/acceptance flags `false`.
+Protocol pilot и live role/acceptance evidence остаются отдельными
+незавершёнными gates.
 Административная замена Qwen model считается runtime drift и prerequisite для
 Ticket 18. Для controlled fixture owner-authorized declaration фиксирует
 `configured_model_id: qwen38-flash-next`, source

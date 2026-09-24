@@ -113,8 +113,11 @@ Exact `protocol` argv contract и его `QWEN_SESSION_GUARD` receipt остаю
 ### Режимы session
 
 `recon` предназначен для простого ограниченного анализа и использует малый
-runtime budget без thinking. `protocol` предназначен для Controller,
-skill-heavy анализа и repair: thinking включён, а output limit не меньше 8000.
+runtime budget (`3 turns / 6 tools / 5m`), сохраняя configured Qwen
+thinking/reasoning. Его не нужно отключать или переопределять ради этого режима.
+`protocol` предназначен для Controller, skill-heavy анализа и repair: thinking
+включён, а output limit не меньше 8000. Решение D046 заменяет прежнее требование
+явного отключения thinking в `recon`.
 
 Sampling (`temperature`, `top_p`, `top_k`, penalties) ProofLoop не задаёт:
 серверные defaults являются источником истины. Packet передаётся на английском

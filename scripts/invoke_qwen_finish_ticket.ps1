@@ -27,6 +27,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:LauncherClock = [Diagnostics.Stopwatch]::StartNew()
+$script:ModelRequestStarted = $false
 
 function Write-GuardStatus {
     param(
@@ -37,6 +39,11 @@ function Write-GuardStatus {
     )
 
     $result = @{ status = $Status }
+    $result.mode = $Mode
+    $result.duration_ms = [long]$script:LauncherClock.ElapsedMilliseconds
+    $result.terminal_reason = if ($Reason) { $Reason } else { $Status }
+    $result.turn_count = if ($script:ModelRequestStarted) { 'NOT_AVAILABLE' } else { 0 }
+    $result.tool_call_count = if ($script:ModelRequestStarted) { 'NOT_AVAILABLE' } else { 0 }
     if ($Reason) {
         $result.reason = $Reason
     }
@@ -386,6 +393,7 @@ else {
 $skipLoopDetection = if ($null -eq $modelSettings) { $null } else { $modelSettings.PSObject.Properties['skipLoopDetection'] }
 $maxToolCallsPerTurn = if ($null -eq $modelSettings) { $null } else { $modelSettings.PSObject.Properties['maxToolCallsPerTurn'] }
 $maxSubagentDepth = if ($null -eq $modelSettings) { $null } else { $modelSettings.PSObject.Properties['maxSubagentDepth'] }
+$reasoningEffort = if ($null -eq $modelSettings) { $null } else { $modelSettings.PSObject.Properties['reasoningEffort'] }
 if ($null -eq $skipLoopDetection -or $skipLoopDetection.Value -ne $false) {
     Stop-Guard -Reason 'LOOP_DETECTION_DISABLED'
 }
@@ -400,6 +408,24 @@ if ($maxSubagentDepth.Value -gt 1) {
 }
 if ($maxSubagentDepth.Value -ne 1) {
     Stop-Guard -Reason 'MAX_SUBAGENT_DEPTH_INVALID'
+}
+
+$reasoningEffortValue = if ($null -eq $reasoningEffort) { '' } else { [string]$reasoningEffort.Value }
+try {
+    $modePolicyArguments = @('--mode', $Mode, '--reasoning-effort', $reasoningEffortValue)
+    $modePolicyJson = & python (Join-Path $PSScriptRoot 'qwen_mode_contract.py') @modePolicyArguments 2>$null | Out-String
+    $modePolicyExitCode = if (Test-Path Variable:global:LASTEXITCODE) { [int]$global:LASTEXITCODE } else { 0 }
+    if ($modePolicyExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($modePolicyJson)) {
+        Stop-Guard -Reason 'MODE_POLICY_UNAVAILABLE'
+    }
+    $modePolicy = $modePolicyJson | ConvertFrom-Json
+}
+catch {
+    Stop-Guard -Reason 'MODE_POLICY_UNAVAILABLE'
+}
+if ($modePolicy.status -ne 'QWEN_MODE_READY') {
+    Write-GuardStatus -Status ([string]$modePolicy.status) -Reason ([string]$modePolicy.reason)
+    exit 3
 }
 
 try {
@@ -507,7 +533,10 @@ if ($Mode -eq 'protocol') {
 
     try {
         $qwenExitCode = 0
-        & $cliCompatibilityConsumer -Mode protocol -QwenCommand $QwenCommand -QwenArgumentsJson ($qwenArguments | ConvertTo-Json -Compress) *> $null
+        $script:ModelRequestStarted = $true
+        $outputTokenLimit = [int]$modePolicy.process_environment.QWEN_CODE_MAX_OUTPUT_TOKENS
+        & $cliCompatibilityConsumer -Mode protocol -QwenCommand $QwenCommand `
+            -QwenArgumentsJson ($qwenArguments | ConvertTo-Json -Compress) -OutputTokenLimit $outputTokenLimit *> $null
         if (Test-Path Variable:global:LASTEXITCODE) {
             $qwenExitCode = $global:LASTEXITCODE
         }

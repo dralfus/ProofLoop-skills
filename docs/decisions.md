@@ -962,3 +962,56 @@ Protocol compatibility child сверяет входной argv с тем же r
 в нём нет отдельной копии protocol limits. Protocol, recon и seal остаются
 разными contracts. Полный suite после этого изменения `154/154`, PowerShell
 parser и plugin validator проходят.
+
+## D045 — Fail-closed Qwen session modes без изменения user settings
+
+Статус: принято и реализовано локально 2026-09-23.
+
+Наблюдаемый failure: launcher не различал mode-level thinking policy и output
+budget. `recon` мог унаследовать configured high reasoning, а `protocol` не
+гарантировал достаточный output budget; изменение persistent settings или
+sampling ради режима нарушило бы user-owned configuration boundary.
+
+Решение: pure `scripts/qwen_mode_contract.py` требует от `recon` явный CLI
+`--no-thinking` и блокирует его до model request, если установленный CLI такой
+capability не показывает. `protocol` требует настроенный reasoning effort и
+передаёт `QWEN_CODE_MAX_OUTPUT_TOKENS=8000` только в дочерний process scope,
+восстанавливая прежнее значение. Sampling, provider, model и settings не
+меняются. Raw-free launcher status включает mode, terminal reason, elapsed
+milliseconds и доступные counters; protocol сохраняет canonical argv.
+
+Измеримый критерий: production-shaped fixture проверяет mode policy,
+process-scoped output cap/restore и отсутствие dispatch при недоступном
+thinking control; установленный Qwen 0.24.4 не публикует `--no-thinking`,
+поэтому live recon завершает `BLOCKED_CAPABILITY`, а следующий protocol pilot
+не запускается. Это не live role-lifecycle evidence.
+
+## D046 — Recon inherits configured Qwen thinking
+
+Статус: принято владельцем 2026-09-24; supersedes the `recon` thinking gate in D045.
+
+Наблюдаемый failure: D045 превратил экономический режимный выбор в capability
+gate. Qwen CLI не имеет отдельного `--no-thinking` флага; при этом thinking
+может быть задан через configured `model.reasoningEffort`, и его наличие само
+по себе не нарушает read-only authority. Поэтому recon блокировался до запроса
+модели, хотя его turn/tool/wall budgets уже ограничивают запуск.
+
+Решение: `recon` сохраняет thinking/reasoning из операторской конфигурации и
+свой малый budget `3/6/5m/depth1`. Launcher не должен требовать отключения
+thinking или редактировать settings/provider/sampling. `protocol` сохраняет
+configured reasoning и process-scoped output cap не ниже 8000.
+
+Следующий шаг: узкий implementation follow-up к Ticket 18 — удалить obsolete
+`--no-thinking` gate из recon launcher/contract, обновить fixtures, затем один
+новый bounded recon pilot. Protocol запускается только после корректного
+terminal outcome recon; при первом guard/evidence/protocol failure — stop без
+retry. Это решение не ослабляет read-only restrictions, authority flags или
+outer runtime budgets.
+
+Результат follow-up: mode policy, canonical argv и launcher больше не требуют
+`--no-thinking`; recon наследует configured reasoning. Qwen 0.24.4 прошёл
+capability smoke (11/11 markers), а bounded recon вернул
+`QWEN_RECON_READY` на clean baseline с валидным structured output и нулевыми
+write/dispatch/acceptance flags. Protocol pilot не является read-only и
+документированная процедура включает Implementer/acceptance; до отдельного
+согласования этой границы он остаётся NOT_RUN.
