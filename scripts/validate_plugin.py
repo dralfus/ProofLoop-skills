@@ -969,6 +969,73 @@ def _runtime_receipt_reason(
     return None
 
 
+_QWEN_TERMINAL_RECEIPT_FIELDS = frozenset({
+    "schema_version", "status", "reason", "launch_id", "session_id_hash",
+    "terminal_reason", "terminal_source", "process_exit_code", "event_coverage",
+    "turns", "tool_calls", "wall_time_seconds", "loop_status",
+    "loop_detector_version", "budget_stop",
+})
+_QWEN_TERMINAL_RECEIPT_VERSION = "proofloop.qwen-terminal-receipt.v1"
+_QWEN_LOOP_DETECTOR_VERSION = "exact_tool_interaction_cycle_v1"
+_QWEN_HOST_BUDGET_STOPS = frozenset({"HOST_WALL_LIMIT", "HOST_TOOL_LIMIT"})
+
+
+def _runtime_terminal_evidence_reason(
+    evidence: object, launch_id: str, observation: dict[str, object]
+) -> str | None:
+    if not isinstance(evidence, dict) or frozenset(evidence) != _QWEN_TERMINAL_RECEIPT_FIELDS:
+        return "TERMINAL_EVIDENCE_MALFORMED"
+    if contains_forbidden_projection_field(evidence):
+        return "RAW_FIELD_FORBIDDEN"
+    if (
+        evidence.get("schema_version") != _QWEN_TERMINAL_RECEIPT_VERSION
+        or evidence.get("status") != "COMPLETE"
+        or evidence.get("reason") not in {"COMPLETE", "NORMAL_EXIT_NOT_RESUMABLE"}
+        or evidence.get("launch_id") != launch_id
+        or re.fullmatch(r"[0-9a-f]{32}", str(evidence.get("launch_id"))) is None
+        or evidence.get("session_id_hash") != observation.get("session_id")
+        or re.fullmatch(r"[0-9a-f]{64}", str(evidence.get("session_id_hash"))) is None
+        or evidence.get("event_coverage") != "COMPLETE"
+        or evidence.get("loop_status") != "HOST_CLEAR"
+        or evidence.get("loop_detector_version") != _QWEN_LOOP_DETECTOR_VERSION
+        or type(evidence.get("budget_stop")) is not bool
+        or any(
+            type(evidence.get(field)) is not int or evidence[field] < 0
+            for field in ("turns", "tool_calls", "wall_time_seconds")
+        )
+        or any(
+            evidence.get(field) != observation.get(field)
+            for field in ("turns", "tool_calls", "wall_time_seconds")
+        )
+        or (evidence.get("loop_status") == "DETECTED") != observation.get("loop_detected")
+    ):
+        return "TERMINAL_EVIDENCE_MISMATCH"
+    terminal_reason = evidence.get("terminal_reason")
+    terminal_source = evidence.get("terminal_source")
+    if evidence.get("budget_stop") is True:
+        if (
+            evidence.get("reason") != "COMPLETE"
+            or terminal_source != "HOST"
+            or terminal_reason not in _QWEN_HOST_BUDGET_STOPS
+            or evidence.get("process_exit_code") is None
+            or type(evidence.get("process_exit_code")) is not int
+            or not -1 <= evidence["process_exit_code"] <= 255
+            or (terminal_reason == "HOST_TOOL_LIMIT" and evidence["tool_calls"] < QWEN_RUNTIME_LIMITS["max_tool_calls"])
+            or (terminal_reason == "HOST_WALL_LIMIT" and evidence["wall_time_seconds"] < 1800)
+        ):
+            return "TERMINAL_EVIDENCE_MISMATCH"
+    elif (
+        terminal_source != "PROCESS"
+        or terminal_reason not in {"NORMAL_EXIT", "PROCESS_FAILURE"}
+        or evidence.get("budget_stop") is not False
+        or evidence.get("process_exit_code") is None
+        or type(evidence.get("process_exit_code")) is not int
+        or not -1 <= evidence["process_exit_code"] <= 255
+    ):
+        return "TERMINAL_EVIDENCE_MISMATCH"
+    return None
+
+
 def _runtime_event_hash(entry: dict[str, object]) -> str:
     unsigned = {key: value for key, value in entry.items() if key != "event_hash"}
     canonical = json.dumps(unsigned, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
@@ -989,8 +1056,21 @@ def _runtime_append_event(
 
 
 def _runtime_observation_is_valid(entry: dict[str, object]) -> bool:
+    observation_fields = {
+        "ledger_id", "sequence", "prev_hash", "event_hash", "event", "launch_id",
+        "session_id", "turns", "tool_calls", "wall_time_seconds", "loop_detected",
+        "tool_fingerprint", "reproducible_evidence", "continuation",
+    }
+    context_present = any(field in entry for field in _RUNTIME_CONTEXT_FIELDS)
+    if context_present:
+        observation_fields.update(_RUNTIME_CONTEXT_FIELDS)
+    if entry.get("continuation") is True:
+        observation_fields.update({"fresh_evidence_id", "checkpoint_id"})
+    if "terminal_evidence_hash" in entry:
+        observation_fields.add("terminal_evidence_hash")
     return (
-        all(
+        frozenset(entry) == observation_fields
+        and all(
             is_nonempty_string(entry.get(field))
             for field in ("launch_id", "session_id", "tool_fingerprint")
         )
@@ -1006,12 +1086,78 @@ def _runtime_observation_is_valid(entry: dict[str, object]) -> bool:
         and entry["wall_time_seconds"] >= 0
         and isinstance(entry.get("loop_detected"), bool)
         and entry.get("reproducible_evidence") is True
+        and (
+            "terminal_evidence_hash" not in entry
+            or re.fullmatch(r"[0-9a-f]{64}", str(entry.get("terminal_evidence_hash"))) is not None
+        )
         and isinstance(entry.get("continuation"), bool)
+        and _runtime_context_fields_valid(entry, required=entry.get("continuation") is True)
         and (
             entry["continuation"] is not True
-            or is_nonempty_string(entry.get("fresh_evidence_id"))
+            or (
+                re.fullmatch(r"[0-9a-f]{32}", str(entry.get("fresh_evidence_id"))) is not None
+                and re.fullmatch(r"[0-9a-f]{64}", str(entry.get("checkpoint_id"))) is not None
+            )
         )
     )
+
+
+_RUNTIME_CONTEXT_FIELDS = ("task_fingerprint", "scope_fingerprint", "baseline_commit")
+_RUNTIME_CHECKPOINT_FIELDS = frozenset({
+    "checkpoint_id", "prior_launch_id", "task_fingerprint", "scope_fingerprint",
+    "baseline_commit", "diff_fingerprint", "progress_ledger_fingerprint",
+    "progress_sequence", "progress_evidence_id", "progress_kind",
+    "next_closure_fingerprint",
+})
+_RUNTIME_BUDGET_STOPS = frozenset({
+    "HOST_WALL_LIMIT", "HOST_TOOL_LIMIT",
+})
+
+
+def _runtime_context_fields_valid(value: dict[str, object], *, required: bool) -> bool:
+    present = [field in value for field in _RUNTIME_CONTEXT_FIELDS]
+    if not any(present) and not required:
+        return True
+    if not all(present):
+        return False
+    return (
+        re.fullmatch(r"[0-9a-f]{64}", str(value.get("task_fingerprint"))) is not None
+        and re.fullmatch(r"[0-9a-f]{64}", str(value.get("scope_fingerprint"))) is not None
+        and re.fullmatch(r"[0-9a-f]{40}", str(value.get("baseline_commit"))) is not None
+    )
+
+
+def _runtime_checkpoint_hash(checkpoint: dict[str, object]) -> str:
+    unsigned = {key: value for key, value in checkpoint.items() if key != "checkpoint_id"}
+    canonical = json.dumps(unsigned, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _runtime_checkpoint_is_valid(checkpoint: object, launch_id: str, observation: dict[str, object]) -> bool:
+    if not isinstance(checkpoint, dict) or frozenset(checkpoint) != _RUNTIME_CHECKPOINT_FIELDS:
+        return False
+    if contains_forbidden_projection_field(checkpoint):
+        return False
+    if (
+        re.fullmatch(r"[0-9a-f]{64}", str(checkpoint.get("checkpoint_id"))) is None
+        or checkpoint.get("checkpoint_id") != _runtime_checkpoint_hash(checkpoint)
+        or checkpoint.get("prior_launch_id") != launch_id
+        or re.fullmatch(r"[0-9a-f]{32}", str(checkpoint.get("prior_launch_id"))) is None
+        or not _runtime_context_fields_valid(checkpoint, required=True)
+        or not _runtime_context_fields_valid(observation, required=True)
+        or any(checkpoint.get(field) != observation.get(field) for field in _RUNTIME_CONTEXT_FIELDS)
+        or re.fullmatch(r"[0-9a-f]{64}", str(checkpoint.get("diff_fingerprint"))) is None
+        or re.fullmatch(r"[0-9a-f]{64}", str(checkpoint.get("progress_ledger_fingerprint"))) is None
+        or not isinstance(checkpoint.get("progress_sequence"), int)
+        or isinstance(checkpoint.get("progress_sequence"), bool)
+        or checkpoint["progress_sequence"] <= 0
+        or re.fullmatch(r"[0-9a-f]{32}", str(checkpoint.get("progress_evidence_id"))) is None
+        or not isinstance(checkpoint.get("progress_kind"), str)
+        or checkpoint["progress_kind"] not in {"LOCAL_GREEN", "REVIEW_CONTINUE"}
+        or re.fullmatch(r"[0-9a-f]{64}", str(checkpoint.get("next_closure_fingerprint"))) is None
+    ):
+        return False
+    return True
 
 
 def _runtime_ledger_reason(ledger: object, anchor: object) -> str | None:
@@ -1031,6 +1177,14 @@ def _runtime_ledger_reason(ledger: object, anchor: object) -> str | None:
         return "RUNTIME_LEDGER_ANCHOR_MISMATCH" if anchor["head_hash"] != "GENESIS" else None
     state = "ACTIVE"
     active_launch_id: str | None = None
+    terminal_reason: str | None = None
+    current_checkpoint: dict[str, object] | None = None
+    last_observation: dict[str, object] | None = None
+    session_fresh_evidence: str | None = None
+    previous_event: str | None = None
+    last_progress_sequence = 0
+    checkpoint_ids: set[str] = set()
+    evidence_ids: set[str] = set()
     previous_hash = "GENESIS"
     for sequence, entry in enumerate(ledger, start=1):
         if not isinstance(entry, dict) or entry.get("sequence") != sequence:
@@ -1048,35 +1202,84 @@ def _runtime_ledger_reason(ledger: object, anchor: object) -> str | None:
             if state != "ACTIVE" or not _runtime_observation_is_valid(entry):
                 return "RUNTIME_LEDGER_INVALID"
             active_launch_id = entry["launch_id"]
+            last_observation = entry
+            current_checkpoint = None
+            if entry.get("continuation") is True:
+                if entry.get("fresh_evidence_id") != session_fresh_evidence:
+                    return "RUNTIME_LEDGER_INVALID"
         elif event == "terminal":
             if (
                 state != "ACTIVE"
+                or frozenset(entry) != {
+                    "ledger_id", "sequence", "prev_hash", "event_hash", "event",
+                    "launch_id", "status", "reason",
+                }
                 or entry.get("status") != "QWEN_RUNTIME_GUARD_STOP"
                 or not is_nonempty_string(entry.get("reason"))
                 or re.fullmatch(r"[0-9a-f]{32}", str(entry.get("launch_id"))) is None
                 or entry.get("launch_id") != active_launch_id
             ):
                 return "RUNTIME_LEDGER_INVALID"
+            terminal_reason = str(entry["reason"])
             state = "TERMINAL"
+        elif event == "checkpoint":
+            checkpoint = {field: entry.get(field) for field in _RUNTIME_CHECKPOINT_FIELDS}
+            checkpoint_event_fields = _RUNTIME_CHECKPOINT_FIELDS | {
+                "ledger_id", "sequence", "prev_hash", "event_hash", "event", "launch_id",
+            }
+            if (
+                state != "ACTIVE"
+                or previous_event != "runtime_observation"
+                or frozenset(entry) != checkpoint_event_fields
+                or entry.get("launch_id") != active_launch_id
+                or not isinstance(last_observation, dict)
+                or not _runtime_checkpoint_is_valid(checkpoint, str(active_launch_id), last_observation)
+                or entry.get("checkpoint_id") in checkpoint_ids
+                or entry.get("progress_evidence_id") in evidence_ids
+                or entry.get("progress_sequence", 0) <= last_progress_sequence
+            ):
+                return "RUNTIME_LEDGER_INVALID"
+            current_checkpoint = checkpoint
+            checkpoint_ids.add(str(entry["checkpoint_id"]))
+            evidence_ids.add(str(entry["progress_evidence_id"]))
+            last_progress_sequence = int(entry["progress_sequence"])
         elif event == "session_start":
             if (
                 state != "TERMINAL"
+                or frozenset(entry) != {
+                    "ledger_id", "sequence", "prev_hash", "event_hash", "event",
+                    "launch_id", "fresh_evidence_id", "checkpoint_id",
+                }
+                or terminal_reason not in _RUNTIME_BUDGET_STOPS
+                or current_checkpoint is None
                 or re.fullmatch(r"[0-9a-f]{32}", str(entry.get("launch_id"))) is None
-                or not is_nonempty_string(entry.get("fresh_evidence_id"))
+                or re.fullmatch(r"[0-9a-f]{32}", str(entry.get("fresh_evidence_id"))) is None
                 or entry.get("launch_id") == active_launch_id
+                or entry.get("checkpoint_id") != current_checkpoint["checkpoint_id"]
+                or entry.get("fresh_evidence_id") in evidence_ids
             ):
                 return "RUNTIME_LEDGER_INVALID"
+            evidence_ids.add(str(entry["fresh_evidence_id"]))
             active_launch_id = entry["launch_id"]
+            session_fresh_evidence = str(entry["fresh_evidence_id"])
             state = "ACTIVE"
+            terminal_reason = None
+            current_checkpoint = None
+            last_observation = None
         else:
             return "RUNTIME_LEDGER_INVALID"
+        if event == "terminal":
+            # A checkpoint is resumable only when it immediately precedes this stop.
+            if entry["reason"] not in _RUNTIME_BUDGET_STOPS:
+                current_checkpoint = None
+        previous_event = str(event)
     if anchor["head_hash"] != previous_hash:
         return "RUNTIME_LEDGER_ANCHOR_MISMATCH"
     return None
 
 
 def _runtime_observation_projection(
-    launch_id: str, observation: dict[str, object]
+    launch_id: str, observation: dict[str, object], terminal_evidence_hash: str | None = None
 ) -> dict[str, object]:
     projection = {
         "event": "runtime_observation",
@@ -1090,9 +1293,15 @@ def _runtime_observation_projection(
         "reproducible_evidence": observation["reproducible_evidence"],
         "continuation": observation["continuation"],
     }
+    for field in _RUNTIME_CONTEXT_FIELDS:
+        if field in observation:
+            projection[field] = observation[field]
     if observation.get("continuation") is True:
         projection["continuation"] = True
         projection["fresh_evidence_id"] = observation["fresh_evidence_id"]
+        projection["checkpoint_id"] = observation["checkpoint_id"]
+    if terminal_evidence_hash is not None:
+        projection["terminal_evidence_hash"] = terminal_evidence_hash
     return projection
 
 
@@ -1142,8 +1351,21 @@ def qwen_runtime_guard_decision(payload: object) -> dict[str, object]:
     )
     if not all(required_observation_types):
         return {"status": "BLOCKED_CAPABILITY", "reason": "RUNTIME_EVIDENCE_MALFORMED", "role_dispatch": False}
+    terminal_evidence = payload.get("terminal_evidence")
+    terminal_evidence_hash = None
+    if "terminal_evidence" in payload:
+        terminal_evidence_reason = _runtime_terminal_evidence_reason(
+            terminal_evidence, str(receipt["launch_id"]), observation
+        )
+        if terminal_evidence_reason is not None:
+            return {"status": "BLOCKED_CAPABILITY", "reason": terminal_evidence_reason, "role_dispatch": False}
+        terminal_evidence_hash = hashlib.sha256(
+            json.dumps(terminal_evidence, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
     if observation["continuation"] is True and (
-        not isinstance(observation.get("fresh_evidence_id"), str) or not observation["fresh_evidence_id"].strip()
+        re.fullmatch(r"[0-9a-f]{32}", str(observation.get("fresh_evidence_id"))) is None
+        or re.fullmatch(r"[0-9a-f]{64}", str(observation.get("checkpoint_id"))) is None
+        or not _runtime_context_fields_valid(observation, required=True)
     ):
         return {"status": "BLOCKED_CAPABILITY", "reason": "CONTINUATION_EVIDENCE_MISSING", "role_dispatch": False}
 
@@ -1155,11 +1377,25 @@ def qwen_runtime_guard_decision(payload: object) -> dict[str, object]:
         if isinstance(entry, dict) and entry.get("event") == "terminal" and isinstance(entry.get("launch_id"), str)
     }
     last_event = output_ledger[-1] if output_ledger else None
+    if observation["continuation"] is True and not (isinstance(last_event, dict) and last_event.get("event") == "terminal"):
+        return {"status": "BLOCKED_CAPABILITY", "reason": "FRESH_SESSION_REQUIRED", "role_dispatch": False}
     if isinstance(last_event, dict) and last_event.get("event") == "terminal":
         if receipt["launch_id"] in terminal_launches:
             return {"status": "BLOCKED_CAPABILITY", "reason": "FRESH_SESSION_REQUIRED", "role_dispatch": False}
-        if not isinstance(last_event, dict) or last_event.get("event") != "terminal" or observation["continuation"] is not True:
+        if observation["continuation"] is not True:
             return {"status": "BLOCKED_CAPABILITY", "reason": "FRESH_SESSION_REQUIRED", "role_dispatch": False}
+        checkpoint_entry = output_ledger[-2] if len(output_ledger) >= 2 else None
+        if (
+            last_event.get("reason") not in _RUNTIME_BUDGET_STOPS
+            or not isinstance(checkpoint_entry, dict)
+            or checkpoint_entry.get("event") != "checkpoint"
+            or checkpoint_entry.get("checkpoint_id") != observation.get("checkpoint_id")
+            or any(checkpoint_entry.get(field) != observation.get(field) for field in _RUNTIME_CONTEXT_FIELDS)
+            or observation.get("fresh_evidence_id") in {
+                entry.get("progress_evidence_id") for entry in output_ledger if isinstance(entry, dict)
+            }
+        ):
+            return {"status": "BLOCKED_CAPABILITY", "reason": "CHECKPOINT_REQUIRED", "role_dispatch": False}
         output_ledger.append(
             _runtime_append_event(
                 output_ledger,
@@ -1167,6 +1403,7 @@ def qwen_runtime_guard_decision(payload: object) -> dict[str, object]:
                     "event": "session_start",
                     "launch_id": receipt["launch_id"],
                     "fresh_evidence_id": observation["fresh_evidence_id"],
+                    "checkpoint_id": observation["checkpoint_id"],
                 },
                 ledger_id,
             )
@@ -1186,25 +1423,52 @@ def qwen_runtime_guard_decision(payload: object) -> dict[str, object]:
         and prior_observation.get("session_id") == observation["session_id"]
         and prior_observation.get("tool_fingerprint") == observation["tool_fingerprint"]
     )
-    output_ledger.append(
-        _runtime_append_event(
-            output_ledger,
-            _runtime_observation_projection(receipt["launch_id"], observation),
-            ledger_id,
-        )
-    )
     stop_reason = None
     if observation["loop_detected"] is True:
         stop_reason = "LOOP_DETECTED"
-    elif observation["turns"] >= QWEN_RUNTIME_LIMITS["max_session_turns"]:
-        stop_reason = "MAX_SESSION_TURNS_EXHAUSTED"
-    elif observation["tool_calls"] >= QWEN_RUNTIME_LIMITS["max_tool_calls"]:
-        stop_reason = "MAX_TOOL_CALLS_EXHAUSTED"
-    elif observation["wall_time_seconds"] >= 1800:
-        stop_reason = "MAX_WALL_TIME_EXHAUSTED"
+    elif terminal_evidence is not None and terminal_evidence.get("budget_stop") is True:
+        stop_reason = str(terminal_evidence["terminal_reason"])
+    elif terminal_evidence is not None and terminal_evidence.get("terminal_reason") == "PROCESS_FAILURE":
+        return {"status": "BLOCKED_CAPABILITY", "reason": "PROCESS_FAILURE_NOT_RESUMABLE", "role_dispatch": False}
+    elif terminal_evidence is not None and terminal_evidence.get("terminal_reason") == "NORMAL_EXIT":
+        stop_reason = "NORMAL_EXIT"
     elif repeated_fingerprint:
         stop_reason = "REPEATED_TOOL_FINGERPRINT"
+    checkpoint = observation.get("checkpoint")
+    if checkpoint is not None and (
+        stop_reason not in _RUNTIME_BUDGET_STOPS
+        or not _runtime_checkpoint_is_valid(checkpoint, str(receipt["launch_id"]), observation)
+    ):
+        return {"status": "BLOCKED_CAPABILITY", "reason": "CHECKPOINT_INVALID", "role_dispatch": False}
+    if checkpoint is not None:
+        previous_checkpoints = [entry for entry in ledger if isinstance(entry, dict) and entry.get("event") == "checkpoint"]
+        if previous_checkpoints:
+            latest_checkpoint = previous_checkpoints[-1]
+            if (
+                checkpoint["checkpoint_id"] in {entry.get("checkpoint_id") for entry in previous_checkpoints}
+                or checkpoint["progress_evidence_id"] in {entry.get("progress_evidence_id") for entry in previous_checkpoints}
+                or checkpoint["progress_evidence_id"] in {
+                    entry.get("fresh_evidence_id") for entry in ledger if isinstance(entry, dict)
+                }
+                or checkpoint["progress_sequence"] <= latest_checkpoint.get("progress_sequence", 0)
+                or any(checkpoint.get(field) != latest_checkpoint.get(field) for field in _RUNTIME_CONTEXT_FIELDS)
+            ):
+                return {"status": "BLOCKED_CAPABILITY", "reason": "CHECKPOINT_INVALID", "role_dispatch": False}
+    output_ledger.append(
+        _runtime_append_event(
+            output_ledger,
+            _runtime_observation_projection(receipt["launch_id"], observation, terminal_evidence_hash),
+            ledger_id,
+        )
+    )
     if stop_reason is not None:
+        if checkpoint is not None:
+            checkpoint_event = {
+                "event": "checkpoint",
+                "launch_id": receipt["launch_id"],
+                **checkpoint,
+            }
+            output_ledger.append(_runtime_append_event(output_ledger, checkpoint_event, ledger_id))
         output_ledger.append(
             _runtime_append_event(
                 output_ledger,

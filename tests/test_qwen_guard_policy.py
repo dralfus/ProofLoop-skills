@@ -134,6 +134,10 @@ class QwenGuardPolicyTest(unittest.TestCase):
         decision_gate = source.index("if ($guardDecision.status -ne 'QWEN_GUARD_READY')", policy_call)
         self.assertLess(policy_call, decision_gate)
         self.assertLess(decision_gate, child_dispatch)
+        runtime_adapter = source.index("qwen_runtime_adapter.py")
+        runtime_gate = source.index("$continuationDecision.status -ne 'QWEN_RUNTIME_GUARD_READY'", runtime_adapter)
+        self.assertLess(runtime_adapter, runtime_gate)
+        self.assertLess(runtime_gate, child_dispatch)
 
 
 if __name__ == "__main__":

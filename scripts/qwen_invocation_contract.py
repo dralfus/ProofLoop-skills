@@ -94,7 +94,7 @@ INVOCATION_CONTRACTS: dict[str, dict[str, object]] = {
     ),
     "protocol": _contract(
         limits={"max_session_turns": 20, "max_tool_calls": 20, "max_wall_time": "30m", "max_subagent_depth": 1},
-        markers=["--prompt", "--max-session-turns", "--max-tool-calls", "--max-wall-time", "--max-subagent-depth"],
+        markers=["--prompt", "--max-session-turns", "--max-tool-calls", "--max-wall-time", "--max-subagent-depth", "--json-file"],
         authority={"read_only": False, "role_dispatch": True, "subagent_dispatch": True, "acceptance": False},
     ),
     "capability_smoke": _contract(

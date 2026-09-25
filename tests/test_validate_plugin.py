@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import importlib.util
+import re
 import subprocess
 import sys
 import unittest
@@ -18,6 +19,51 @@ SPEC.loader.exec_module(VALIDATE_PLUGIN)
 
 
 class ValidatePluginTest(unittest.TestCase):
+    def test_qwen_checkpoint_contract_is_consistent_in_canonical_and_operator_docs(self) -> None:
+        canonical = (
+            PLUGIN_ROOT / "skills" / "finish-ticket" / "references" / "task-lifecycle.md"
+        ).read_text(encoding="utf-8")
+        operator = (REPOSITORY_ROOT / "docs" / "codex-task-lifecycle.md").read_text(encoding="utf-8")
+        for name, document in (("canonical", canonical), ("operator", operator)):
+            with self.subTest(document=name):
+                required_phrases = (
+                    "MAX_SESSION_TURNS_EXHAUSTED",
+                    "MAX_TOOL_CALLS_EXHAUSTED",
+                    "MAX_WALL_TIME_EXHAUSTED",
+                    "LOOP_DETECTED",
+                    "REPEATED_TOOL_FINGERPRINT",
+                    "task_fingerprint",
+                    "scope_fingerprint",
+                    "baseline_commit",
+                    "progress_sequence",
+                    "next_closure_fingerprint",
+                    "счётчики",
+                    "Controller",
+                    "настройки пользователя",
+                    "Controller-attested",
+                    "не перепроверяет внешний progress ledger",
+                    "--json-file",
+                    "-ContinuationEvidencePath",
+                    "QWEN_RUNTIME_EVIDENCE_UNSUPPORTED",
+                    "HOST_WALL_LIMIT",
+                    "HOST_TOOL_LIMIT",
+                    "HOST_CLEAR",
+                    "exact_tool_interaction_cycle_v1",
+                    "capability `--help` preflight",
+                    "NORMAL_EXIT",
+                    "event_coverage=COMPLETE",
+                    "Ticket 24",
+                    "BLOCKED_EVIDENCE_SOURCE",
+                    "NOT_RUN",
+                    "настройки пользователя",
+                    "reasoning",
+                    "sampling",
+                    "20 tool calls / 30m / depth 1",
+                )
+                normalized = re.sub(r"\s+", " ", document.casefold())
+                missing = [required for required in required_phrases if required.casefold() not in normalized]
+                self.assertEqual(missing, [])
+
     def test_runtime_contract_includes_opaque_reject_diagnostic_gate(self) -> None:
         """Published runtime must retain the bounded raw-free diagnostic rule."""
         VALIDATE_PLUGIN.validate(PLUGIN_ROOT)

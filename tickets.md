@@ -114,16 +114,17 @@ See `docs/experiments/qwen-assist-manifest-smoke-2026-09-19.md`.
 candidate diff в своей worktree. Codex independently проверяет candidate и сам
 переносит только одобренное изменение; Qwen не выполняет Git-интеграцию.
 
-**Blocked by:** none for implementation; candidate transfer still needs an
-independent review and a bounded transfer-evidence run.
+**Blocked by:** none.
 
-**Status:** partial — bounded candidate and end-to-end manifest-only seal are
-proven; independent candidate transfer is not yet proven.
+**Status:** local transfer complete; independent review and executable
+evidence passed. Ticket 314 acceptance, production implementation, and commit
+remain outside this ticket's evidence.
 
 - [x] Candidate ограничен двумя файлами, 200 изменёнными строками и одним
   targeted test.
 - [x] Qwen не может commit, merge, cherry-pick, push, full suite или acceptance.
-- [ ] Transfer требует independent Codex review и executable evidence.
+- [x] Transfer выполнен только для reviewed test-only diff; independent Codex
+  review и focused executable evidence passed.
 # Tickets: сходимость finish-ticket по урокам Ticket 355
 
 Источник: docs/specs/finish-ticket-ticket-355-convergence.md.
@@ -363,8 +364,21 @@ runtime loop без автоматического continuation.
 
 **Blocked by:** 16. Guarded launcher native Qwen Code; 17. Lifecycle gate и terminal stop guarded Qwen session.
 
-**Status:** implementation follow-up complete locally; capability smoke and
-bounded recon pilot PASS; protocol pilot NOT_RUN.
+**Status:** implementation and follow-up are complete locally; capability
+smoke and bounded recon pilot PASS. The first protocol invocation stopped at
+`BLOCKED_CAPABILITY / LOCAL_SETTINGS_UNAVAILABLE` before Qwen dispatch; that
+preflight failure was not retried automatically and its path cause was fixed.
+A later separate bounded protocol launch reached Qwen and returned
+`QWEN_COMMAND_FAILED` after `33,279 ms`; counters were unavailable, session
+ending was false, loop state was `UNOBSERVED`, and `budget_stop=false`. Its
+raw-free output omitted Qwen's exit code and terminal-envelope classification,
+so the actual Qwen failure cause remains unknown. The live protocol pilot is
+therefore FAILED / E2E success NOT PROVEN, not `NOT_RUN`; no further launch is
+authorized by this record. Local D050 regression now verifies that future
+failure projections preserve allowlisted envelope classification, counters
+when available, and exit codes without raw output. The post-attempt credential
+regression also verifies the key is removed before Python projection and the
+prior process value is restored.
 
 - [x] `recon` сохраняет малый budget `3 turns / 6 tools / 5m` и наследует
   настроенный Qwen thinking/reasoning; ему не нужен CLI-переключатель
@@ -375,15 +389,22 @@ bounded recon pilot PASS; protocol pilot NOT_RUN.
   не становится version allow-list.
 - [x] Fixtures и bounded attempt публикуют raw-free guard outcome, terminal
   reason, duration, mode и доступные turn/tool counters.
+- [x] D050 regression фиксирует synthetic adapter→CLI→parent path для
+  terminal error envelope, adapter exit `3`, raw-free classification/counters
+  и Qwen/projector exit codes; fixture не используется для классификации live
+  failure.
 
 Capability smoke: Qwen `0.24.4`, all 11 required CLI capabilities present,
 configured reasoning and ProofLoop extension present. Recon launch
 `3bdb60eef61442fdba7f73467cbba746` returned `QWEN_RECON_READY` with exact clean
 baseline `335ba1dc0364e7bb9ac0413925e1a1e8440cb760`, schema-valid structured
 report, `writes=false`, and `role_dispatch=false`, `subagent_dispatch=false`,
-`acceptance=false`. Protocol pilot remains NOT_RUN; the documented native
-`/finish-ticket` protocol pilot includes Implementer and acceptance roles,
-outside the currently bounded no-Implementer/no-acceptance scope.
+`acceptance=false`. The approved native protocol pilot is narrowed to the
+disposable `qwen-protocol-pilot-ticket.md`: one test-only method, independent
+Reviewer and Verifier, no Ticket 314 product implementation/acceptance and no
+transfer. Its single launch stopped before model dispatch; no retry was made.
+The 2026-09-24 protocol pilot attempt and preflight failure are recorded in
+`docs/experiments/qwen-protocol-pilot-auth-path-20260924.md`.
 
 ## 19. Capability-based Qwen launcher compatibility
 
@@ -450,7 +471,9 @@ receipt и пустой genesis ledger, а active старый ledger не мо�
 
 **Blocked by:** separate authorization for any live Ticket 18 pilot; no automatic launch.
 
-**Status:** implemented locally; F1 `PASS`; `SPEC: SCOPED_PASS`; NOT DONE; live Qwen/recon/protocol and acceptance NOT_RUN.
+**Status:** local implementation and F1 `PASS`; `SPEC: SCOPED_PASS`. Live
+recon/protocol and product acceptance remain NOT_RUN, so the runtime lifecycle
+claim is intentionally not marked DONE.
 
 - [x] Terminal recon ledger необратимо закрыт и никогда не принимается снова.
 - [x] New session требует нового `receipt`, `launch_id`, `session_id`,
@@ -487,3 +510,100 @@ markers false, and no ledger append), and duplicate active `launch_id`/
   evidence, объясняющие их сохранение.
 - [x] После закрытия обоих критериев получен fresh independent review; Ticket 18
   live pilot не запускается автоматически.
+
+## 22. Progress-gated continuation для native Qwen protocol
+
+**Что реализовать:** policy contract для новой Qwen protocol session после
+per-session budget stop только с Controller-attested raw-free checkpoint; loop
+и repeated fingerprint остаются терминальными. Численные лимиты и
+пользовательская конфигурация не меняются. Этот ticket не подключает policy к
+native launcher и не доказывает live continuation.
+
+**Design и plan:**
+
+- `docs/superpowers/specs/2026-09-24-qwen-progress-gated-continuation-design.md`
+- `docs/superpowers/plans/2026-09-24-qwen-progress-gated-continuation.md`
+
+**Blocked by:** Tickets 16/17/18; Ticket 21 lifecycle foundation.
+
+**Status:** implemented locally; policy-only; native launcher NOT_CONNECTED;
+live multi-repair pilot NOT_RUN.
+
+- [x] Только `MAX_SESSION_TURNS_EXHAUSTED`, `MAX_TOOL_CALLS_EXHAUSTED` и
+  `MAX_WALL_TIME_EXHAUSTED` могут перейти к новой session.
+- [x] Checkpoint связывает unchanged task/scope/baseline, observed diff,
+  append-only progress evidence/sequence, свежий evidence id и следующий
+  measurable closure; старые counters не сбрасываются.
+- [x] `LOOP_DETECTED`, `REPEATED_TOOL_FINGERPRINT`, replay, regression,
+  scope drift и повреждённый checkpoint блокируют dispatch.
+- [x] Canonical lifecycle, runtime profile, operator guide, decision и
+  current-state синхронизированы; tests/validators/full local suite проходят.
+- [x] Live Qwen, transfer, acceptance и commit не входят в этот ticket.
+
+## 23. Подключить progress checkpoint к native Qwen launcher
+
+**Что реализовать:** провести raw-free Controller-attested checkpoint через
+production native protocol launcher, чтобы он вызывал runtime gate перед fresh
+session и продолжал только при `QWEN_RUNTIME_GUARD_READY`. Host обязан
+независимо сверить worktree/diff, canonical progress ledger и test/review
+receipts до построения checkpoint; pure policy не может доказать эти внешние
+факты из opaque hashes.
+
+**Blocked by:** Ticket 22 (локальный checkpoint policy contract).
+
+**Design и plan:**
+
+- `docs/superpowers/specs/2026-09-24-qwen-native-checkpoint-adapter-design.md`
+- `docs/superpowers/plans/2026-09-24-qwen-native-checkpoint-adapter.md`
+
+**Status:** implemented locally; adapter→policy and D051 host-terminal evidence
+fixtures PASS; live native continuation NOT_RUN. Continuation now additionally
+requires a complete host-owned receipt and a verified checkpoint, but fake
+fixtures are not proof of compatibility with the installed native Qwen process.
+
+- [x] Native runtime вызывает checkpoint policy на пути guarded protocol
+  continuation; никаких Qwen settings/provider/sampling changes.
+- [x] Host-side evidence adapter сверяет progress ledger, diff fingerprint,
+  task/scope/baseline и next closure до dispatch.
+- [x] Fixtures доказывают end-to-end adapter → policy → fresh session decision;
+  старые counters/evidence сохраняются, loop/fingerprint остаются terminal.
+- [x] Локальный end-to-end host-evidence proof пройден; bounded live
+  multi-repair pilot остаётся отдельным gate. Commit/transfer/acceptance имеют
+  отдельные gates.
+
+## 24. Bounded live multi-repair Qwen continuation pilot
+
+**Что доказать:** на отдельном disposable test-only ticket выполнить native
+Qwen multi-repair путь с checkpoint continuation только после подтверждённого
+budget stop, актуального Controller evidence и `QWEN_RUNTIME_GUARD_READY`.
+
+**Blocked by:** installed Qwen Code `v0.24.4` native `--json-file` does not
+expose a typed budget-stop reason or explicit loop-clear. The settings-neutral
+host-owned alternative from D051 is implemented and passes local fake-process/
+evidence tests, but it has not yet been validated against the real Qwen child,
+native sidecar and console behavior. Headless output is a different invocation
+path and exit `55` conflates wall-time/tool-call budgets. No live-verified
+terminal evidence source is available yet; see the 2026-09-25 refresh
+`docs/research/qwen-v0245-terminal-evidence-refresh-20260925.md` and the
+version-pinned v0.24.4 analysis
+`docs/research/qwen-v0244-dual-output-terminal-evidence.md`.
+
+**Status:** BLOCKED_EVIDENCE_SOURCE; local host evidence is implemented. One
+bounded disposable protocol launch was attempted on 2026-09-25 and failed closed
+before eligible terminal evidence; the multi-repair continuation remains
+NOT_RUN pending a separately authorized native-compatibility gate.
+
+- [x] CLI capability/preflight gate passes without changing user Qwen
+  settings/provider/sampling/role profile; raw-free receipt:
+  `.scratch/qwen-ticket24-capability-smoke-20260924.json`.
+- [x] Host-owned receipt contract and loop detector pass local fake-process/
+  evidence/lifecycle verification.
+- [x] One bounded live diagnostic launch ended with raw-free status
+  `QWEN_COMMAND_FAILED`, counters `NOT_AVAILABLE`, `loop_status=UNOBSERVED`,
+  `budget_stop=false`; root cause was not established and no retry was made.
+- [ ] Один bounded session reaches an allowed budget terminal with verifiable
+  raw-free projection; loop/repeated fingerprint remain terminal.
+- [ ] Host adapter independently binds worktree/progress/test/review evidence
+  and dispatches exactly one fresh session.
+- [ ] Сохранены counters/ledger и raw-free terminal evidence; no transfer,
+  acceptance or commit without separate gates.

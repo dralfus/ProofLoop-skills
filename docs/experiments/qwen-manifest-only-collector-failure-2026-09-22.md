@@ -61,3 +61,16 @@ Fresh bounded seal launch `cbffea5e84ed421cb1566e61b7cd4485` used
 reservation identity. The capture reader returned `SEALED_CANDIDATE`. No
 transfer, commit, acceptance or product implementation followed. This is the
 first end-to-end proof of the Qwen manifest-only seal path.
+
+## Reviewed test-only transfer, 2026-09-24
+
+The previously sealed candidate was independently reviewed against the
+existing `validate_patch_candidate` contract. Review found no Critical or
+Important issues and approved transfer of only the tracked regression test;
+the adjacent untracked `.qwen/` artifact was excluded. The test asserts that a
+candidate with zero changed lines is rejected as `PATCH_SCOPE_EXCEEDED`.
+
+Execution evidence on the target worktree: focused test passed; the full
+`tests.test_qwen_assist` module passed (`28/28`); `git diff --check` passed.
+The transfer is local and uncommitted. No Ticket 314 acceptance,
+product implementation, commit, or push was performed.

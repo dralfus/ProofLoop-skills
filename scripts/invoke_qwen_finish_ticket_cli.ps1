@@ -8,6 +8,11 @@ param(
 
     [string]$QwenArgumentsJson,
 
+    [ValidatePattern('^[0-9a-f]{32}$')]
+    [string]$LaunchId,
+
+    [string]$ContinuationPacket,
+
     [ValidateRange(8000, 2147483647)]
     [int]$OutputTokenLimit = 8000,
 
@@ -140,6 +145,12 @@ if ($Mode -eq 'protocol') {
             Stop-CommandContract
         }
     }
+    if ($ContinuationPacket -and (
+        [string]::IsNullOrWhiteSpace($ContinuationPacket) -or
+        $ContinuationPacket.Length -gt 32768
+    )) {
+        Stop-CommandContract
+    }
 }
 else {
     if (-not $Ticket -or $Ticket -notmatch '^[A-Za-z0-9._/-]+$' -or -not $SchemaPath -or -not $Worktree -or
@@ -160,29 +171,50 @@ else {
 
 try {
     $qwenExitCode = 0
+    $runtimeProjection = $null
+    $runtimeProjectionJson = $null
+    $failureEnvelopeProjection = $null
+    $runtimeProjectionExitCode = $null
+    $runtimeProjectionOutputPresent = $false
+    $runtimeProjectionParseValid = $false
     $qwenOutput = ''
     $qwenErrorOutput = ''
     $stderrPath = $null
     $locationPushed = $false
     $credentialInjected = $false
     $credentialSecret = $null
+    $eventFilePath = $null
+    $processObservationPath = $null
+    $processObservation = $null
+    $hostBoundedComplete = $false
+    $protocolLaunchId = $null
+    $runtimeClock = [Diagnostics.Stopwatch]::StartNew()
     $previousApiKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY', 'Process')
     $previousBaseUrl = [Environment]::GetEnvironmentVariable('OPENAI_BASE_URL', 'Process')
     $previousModel = [Environment]::GetEnvironmentVariable('OPENAI_MODEL', 'Process')
     $previousOutputLimit = [Environment]::GetEnvironmentVariable('QWEN_CODE_MAX_OUTPUT_TOKENS', 'Process')
     if ($Mode -eq 'protocol') {
         $env:QWEN_CODE_MAX_OUTPUT_TOKENS = [string]$OutputTokenLimit
+        $eventFilePath = [IO.Path]::GetTempFileName()
+        $processObservationPath = [IO.Path]::GetTempFileName()
+        $protocolLaunchId = if ($LaunchId) { $LaunchId } else { [guid]::NewGuid().ToString('N').ToLowerInvariant() }
+        if ($ContinuationPacket) {
+            $qwenArguments[9] = [string]$qwenArguments[9] + "`n`nPROOFLOOP_VERIFIED_CONTINUATION:`n" + $ContinuationPacket
+        }
+        $qwenArguments += @('--json-file', $eventFilePath)
     }
-    if ($Mode -eq 'recon') {
-        $qwenCommandLeaf = Split-Path -Leaf $QwenCommand
-        if ($qwenCommandLeaf -in @('qwen', 'qwen.cmd', 'qwen.exe')) {
-            . (Join-Path $PSScriptRoot 'qwen_credential.ps1')
-            $credentialSecret = Get-ProofLoopQwenGenericSecret -Target $CredentialTarget
-            $env:OPENAI_API_KEY = $credentialSecret
+    $qwenCommandLeaf = Split-Path -Leaf $QwenCommand
+    if ($qwenCommandLeaf -in @('qwen', 'qwen.cmd', 'qwen.exe')) {
+        . (Join-Path $PSScriptRoot 'qwen_credential.ps1')
+        $credentialSecret = Get-ProofLoopQwenGenericSecret -Target $CredentialTarget
+        $env:OPENAI_API_KEY = $credentialSecret
+        $credentialInjected = $true
+        if ($Mode -eq 'recon') {
             $env:OPENAI_BASE_URL = $OpenAIBaseUrl
             $env:OPENAI_MODEL = $OpenAIModel
-            $credentialInjected = $true
         }
+    }
+    if ($Mode -eq 'recon') {
         Push-Location -LiteralPath $Worktree
         $locationPushed = $true
         $stderrPath = [IO.Path]::GetTempFileName()
@@ -192,10 +224,85 @@ try {
         }
     }
     else {
-        & $QwenCommand @qwenArguments *> $null
+        . (Join-Path $PSScriptRoot 'qwen_protocol_supervisor.ps1')
+        $supervisorResult = Invoke-QwenProtocolChild `
+            -QwenCommand $QwenCommand `
+            -QwenArguments $qwenArguments `
+            -EventFilePath $eventFilePath `
+            -LaunchId $protocolLaunchId `
+            -MaxToolCalls 20 `
+            -MaxWallTimeSeconds 1800
+        $qwenExitCode = [int]$supervisorResult.qwen_exit_code
+        $processObservation = $supervisorResult.process_observation
+        [IO.File]::WriteAllText(
+            $processObservationPath,
+            ($processObservation | ConvertTo-Json -Compress -Depth 4),
+            [Text.UTF8Encoding]::new($false)
+        )
     }
-    if (Test-Path Variable:global:LASTEXITCODE) {
+    if ($Mode -eq 'recon' -and (Test-Path Variable:global:LASTEXITCODE)) {
         $qwenExitCode = $global:LASTEXITCODE
+    }
+    if ($credentialInjected) {
+        if ($null -eq $previousApiKey) { Remove-Item Env:OPENAI_API_KEY -ErrorAction SilentlyContinue } else { $env:OPENAI_API_KEY = $previousApiKey }
+        if ($null -eq $previousBaseUrl) { Remove-Item Env:OPENAI_BASE_URL -ErrorAction SilentlyContinue } else { $env:OPENAI_BASE_URL = $previousBaseUrl }
+        if ($null -eq $previousModel) { Remove-Item Env:OPENAI_MODEL -ErrorAction SilentlyContinue } else { $env:OPENAI_MODEL = $previousModel }
+        $credentialSecret = $null
+        $credentialInjected = $false
+    }
+    if ($Mode -eq 'protocol' -and $eventFilePath -and (Test-Path -LiteralPath $eventFilePath -PathType Leaf) -and
+        $processObservationPath -and (Test-Path -LiteralPath $processObservationPath -PathType Leaf)) {
+        $runtimeClock.Stop()
+        $wallTime = [int][Math]::Ceiling($runtimeClock.Elapsed.TotalSeconds)
+        $nativeCommandErrorPreference = Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+        if ($null -ne $nativeCommandErrorPreference) { $PSNativeCommandUseErrorActionPreference = $false }
+        try {
+            $projectionJson = & python (Join-Path $PSScriptRoot 'qwen_runtime_adapter.py') `
+                '--project-events' $eventFilePath `
+                '--process-observation-file' $processObservationPath `
+                '--launch-id' $protocolLaunchId 2>$null | Out-String
+        }
+        finally {
+            if ($null -ne $nativeCommandErrorPreference) { $PSNativeCommandUseErrorActionPreference = [bool]$nativeCommandErrorPreference.Value }
+        }
+        $runtimeProjectionExitCode = if (Test-Path Variable:global:LASTEXITCODE) { [int]$global:LASTEXITCODE } else { 0 }
+        $runtimeProjectionOutputPresent = -not [string]::IsNullOrWhiteSpace($projectionJson)
+        # The adapter uses exit 3 for a valid fail-closed projection. Preserve
+        # that raw-free JSON instead of replacing it with a generic fallback.
+        if ($runtimeProjectionExitCode -in @(0, 3) -and $runtimeProjectionOutputPresent) {
+            try {
+                $runtimeProjection = $projectionJson | ConvertFrom-Json
+                $runtimeProjectionParseValid = $null -ne $runtimeProjection
+                if ($runtimeProjectionParseValid) {
+                    $runtimeProjectionJson = $runtimeProjection | ConvertTo-Json -Compress -Depth 4
+                }
+            }
+            catch {
+                $runtimeProjection = [pscustomobject]@{ status = 'BLOCKED_CAPABILITY'; reason = 'QWEN_RUNTIME_EVIDENCE_UNSUPPORTED'; role_dispatch = $false }
+                $runtimeProjectionJson = $runtimeProjection | ConvertTo-Json -Compress -Depth 4
+            }
+        }
+        if (-not $runtimeProjectionJson) {
+            $runtimeProjection = [pscustomobject]@{ status = 'BLOCKED_CAPABILITY'; reason = 'QWEN_RUNTIME_EVIDENCE_UNSUPPORTED'; role_dispatch = $false }
+            $runtimeProjectionJson = $runtimeProjection | ConvertTo-Json -Compress -Depth 4
+        }
+        if ($qwenExitCode -ne 0) {
+            try {
+                $failureEnvelopeJson = & python (Join-Path $PSScriptRoot 'qwen_runtime_adapter.py') `
+                    '--project-events' $eventFilePath `
+                    '--wall-time-seconds' $wallTime 2>$null | Out-String
+                $failureEnvelopeExitCode = if (Test-Path Variable:global:LASTEXITCODE) { [int]$global:LASTEXITCODE } else { 0 }
+                if ($failureEnvelopeExitCode -in @(0, 3) -and -not [string]::IsNullOrWhiteSpace($failureEnvelopeJson)) {
+                    $candidate = $failureEnvelopeJson | ConvertFrom-Json
+                    if ($candidate.reason -eq 'QWEN_JSON_ERROR_RESULT' -and $candidate.diagnostic -is [pscustomobject]) {
+                        $failureEnvelopeProjection = $candidate
+                    }
+                }
+            }
+            catch {
+                $failureEnvelopeProjection = $null
+            }
+        }
     }
 }
 catch {
@@ -203,6 +310,12 @@ catch {
     exit 4
 }
 finally {
+    if ($eventFilePath -and (Test-Path -LiteralPath $eventFilePath -PathType Leaf)) {
+        Remove-Item -LiteralPath $eventFilePath -Force -ErrorAction SilentlyContinue
+    }
+    if ($processObservationPath -and (Test-Path -LiteralPath $processObservationPath -PathType Leaf)) {
+        Remove-Item -LiteralPath $processObservationPath -Force -ErrorAction SilentlyContinue
+    }
     if ($stderrPath -and (Test-Path -LiteralPath $stderrPath -PathType Leaf)) {
         Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
     }
@@ -220,7 +333,15 @@ finally {
     }
 }
 
-if ($qwenExitCode -ne 0) {
+if ($Mode -eq 'protocol' -and $runtimeProjection -and
+    $runtimeProjection.status -eq 'COMPLETE' -and
+    $runtimeProjection.terminal_source -eq 'HOST' -and
+    $runtimeProjection.budget_stop -eq $true -and
+    $runtimeProjection.loop_status -eq 'HOST_CLEAR') {
+    $hostBoundedComplete = $true
+}
+
+if ($qwenExitCode -ne 0 -and -not $hostBoundedComplete) {
     if ($Mode -eq 'recon' -and
         (Test-QwenNativeAbortExitCode -ExitCode $qwenExitCode) -and
         (Test-QwenStructuredSuccessOutput -Output $qwenOutput)) {
@@ -231,11 +352,80 @@ if ($qwenExitCode -ne 0) {
         $failureProjection = Get-QwenFailureProjection -Stdout $qwenOutput -Stderr $qwenErrorOutput
         @{ status = 'QWEN_COMMAND_FAILED'; reason = $failureProjection.reason; diagnostic = $failureProjection.diagnostic } | ConvertTo-Json -Compress
     }
+    elseif ($runtimeProjectionJson) {
+        $failureReason = 'QWEN_COMMAND_FAILED'
+        $runtimeReasonProperty = $runtimeProjection.PSObject.Properties['reason']
+        if ($null -ne $runtimeReasonProperty -and [string]$runtimeReasonProperty.Value -in @('QWEN_JSON_ERROR_RESULT', 'QWEN_RUNTIME_EVIDENCE_UNSUPPORTED')) {
+            $failureReason = [string]$runtimeReasonProperty.Value
+        }
+        if ($null -ne $failureEnvelopeProjection) { $failureReason = 'QWEN_JSON_ERROR_RESULT' }
+        $failureProjection = [ordered]@{
+            status = 'QWEN_COMMAND_FAILED'
+            reason = $failureReason
+            qwen_exit_code = [int]$qwenExitCode
+            runtime_evidence_status = [string]$runtimeProjection.status
+            runtime_projection_output_present = [bool]$runtimeProjectionOutputPresent
+            runtime_projection_parse_valid = [bool]$runtimeProjectionParseValid
+        }
+        if ($null -ne $runtimeProjectionExitCode) { $failureProjection.runtime_projection_exit_code = [int]$runtimeProjectionExitCode }
+        foreach ($field in @('session_id', 'session_id_hash', 'turns', 'tool_calls', 'wall_time_seconds', 'session_ended', 'terminal_reason', 'terminal_source', 'event_coverage', 'budget_stop', 'loop_status', 'loop_detector_version', 'tool_fingerprint')) {
+            $property = $runtimeProjection.PSObject.Properties[$field]
+            if ($null -ne $property) { $failureProjection[$field] = $property.Value }
+        }
+        $runtimeDiagnostic = $runtimeProjection.PSObject.Properties['diagnostic']
+        if ($null -ne $runtimeDiagnostic -and $runtimeDiagnostic.Value -is [pscustomobject]) {
+            $safeDiagnostic = [ordered]@{}
+            foreach ($field in @('terminal_result', 'terminal_is_error', 'error_message_present')) {
+                $property = $runtimeDiagnostic.Value.PSObject.Properties[$field]
+                if ($null -ne $property -and $property.Value -is [bool]) { $safeDiagnostic[$field] = [bool]$property.Value }
+            }
+            $subtypeProperty = $runtimeDiagnostic.Value.PSObject.Properties['terminal_subtype']
+            if ($null -ne $subtypeProperty -and [string]$subtypeProperty.Value -in @('none', 'success', 'error_during_execution', 'other')) {
+                $safeDiagnostic.terminal_subtype = [string]$subtypeProperty.Value
+            }
+            $categoryProperty = $runtimeDiagnostic.Value.PSObject.Properties['error_message_category']
+            if ($null -ne $categoryProperty -and [string]$categoryProperty.Value -in @('none', 'structured_output_missing', 'auth_or_forbidden', 'transport', 'other')) {
+                $safeDiagnostic.error_message_category = [string]$categoryProperty.Value
+            }
+            if ($safeDiagnostic.Count -gt 0) { $failureProjection.diagnostic = $safeDiagnostic }
+        }
+        if ($null -ne $failureEnvelopeProjection) {
+            foreach ($field in @('session_id', 'turns', 'tool_calls', 'wall_time_seconds', 'tool_fingerprint')) {
+                $property = $failureEnvelopeProjection.PSObject.Properties[$field]
+                if ($null -ne $property) { $failureProjection[$field] = $property.Value }
+            }
+            $sourceDiagnostic = $failureEnvelopeProjection.diagnostic
+            $safeDiagnostic = [ordered]@{}
+            foreach ($field in @('terminal_result', 'terminal_is_error', 'error_message_present')) {
+                $property = $sourceDiagnostic.PSObject.Properties[$field]
+                if ($null -ne $property -and $property.Value -is [bool]) { $safeDiagnostic[$field] = [bool]$property.Value }
+            }
+            $subtypeProperty = $sourceDiagnostic.PSObject.Properties['terminal_subtype']
+            if ($null -ne $subtypeProperty -and [string]$subtypeProperty.Value -in @('none', 'success', 'error_during_execution', 'other')) {
+                $safeDiagnostic.terminal_subtype = [string]$subtypeProperty.Value
+            }
+            $categoryProperty = $sourceDiagnostic.PSObject.Properties['error_message_category']
+            if ($null -ne $categoryProperty -and [string]$categoryProperty.Value -in @('none', 'structured_output_missing', 'auth_or_forbidden', 'transport', 'other')) {
+                $safeDiagnostic.error_message_category = [string]$categoryProperty.Value
+            }
+            if ($safeDiagnostic.Count -gt 0) { $failureProjection.diagnostic = $safeDiagnostic }
+        }
+        $failureProjection | ConvertTo-Json -Compress -Depth 4
+    }
     else {
         @{ status = 'QWEN_COMMAND_FAILED'; reason = 'QWEN_COMMAND_FAILED' } | ConvertTo-Json -Compress
     }
     exit $qwenExitCode
 }
+
+    if ($Mode -eq 'protocol') {
+        if (-not $runtimeProjectionJson) {
+            $runtimeProjection = [pscustomobject]@{ status = 'BLOCKED_CAPABILITY'; reason = 'QWEN_RUNTIME_EVIDENCE_UNSUPPORTED'; role_dispatch = $false }
+            $runtimeProjectionJson = $runtimeProjection | ConvertTo-Json -Compress -Depth 4
+        }
+        Write-Output $runtimeProjectionJson
+        exit 0
+    }
 
 if ($Mode -eq 'recon') {
     $qwenOutput.Trim()

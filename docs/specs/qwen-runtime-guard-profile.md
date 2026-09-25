@@ -61,6 +61,15 @@ ProofLoop поставляет отдельный launcher, который до 
 Новый launcher является дополнительным executable entry point; существующие
 Qwen команды и настройки других программ не переписываются.
 
+Для OpenAI-compatible auth launcher читает Generic Credential из Windows
+Credential Manager и временно назначает его `OPENAI_API_KEY` только процессу
+native Qwen CLI. Он передаёт настроенный `CredentialTarget` без копирования
+секрета в argv, receipt или log и восстанавливает прежний process environment
+сразу после возврата Qwen, до projection и других subprocess; `finally`
+страхует исключительный путь. Protocol не переопределяет endpoint/model; recon
+использует отдельные configured endpoint/model process variables. Qwen
+settings, пользовательский environment и sampling не изменяются.
+
 Общая pre-dispatch seam реализована pure-модулем
 `scripts/qwen_guard_policy.py`. Adapter передаёт ему только projected
 settings, capability markers, worktree facts и receipt facts через временный
@@ -153,6 +162,38 @@ Terminal event добавляется append-only. Gate сверяет immutable
 `ledger_anchor` (`ledger_id`, `sequence`, `head_hash`) и hash chain
 `prev_hash`/`event_hash`, поэтому удаление или замена prefix блокируется. Guard
 decision сам не запускает Qwen, role-agent или acceptance.
+
+Только три budget terminal reasons разрешают проверку checkpoint для fresh
+protocol session: `MAX_SESSION_TURNS_EXHAUSTED`,
+`MAX_TOOL_CALLS_EXHAUSTED`, `MAX_WALL_TIME_EXHAUSTED`. `LOOP_DETECTED` и
+`REPEATED_TOOL_FINGERPRINT` остаются невозобновляемыми. Controller перед
+продолжением проверяет неизменные ticket/task/scope/baseline fingerprints,
+наблюдаемый diff, канонический progress ledger с возрастающим
+`progress_sequence`, актуальный `LOCAL_GREEN` или независимый
+`REVIEW_CONTINUE`, и один `next_closure_fingerprint`. Raw-free checkpoint
+связывает эти данные с `prior_launch_id`, `progress_evidence_id` и
+`checkpoint_id`; последний является SHA-256 от канонического JSON полей
+checkpoint. Checkpoint event append-only предшествует terminal; прежние
+счётчики и события не сбрасываются. Fresh receipt/launch/evidence обязаны
+совпадать с сохранённым checkpoint, а исходный scope ticket не меняется.
+Недостающий или повреждённый checkpoint не открывает новую сессию. Никаких
+prompt, secret, path, diff text, command или raw output в evidence нет.
+Настройки пользователя, provider, reasoning и sampling не изменяются.
+Это Controller-attested input contract: policy проверяет projected values и
+append-only linkage, но не перепроверяет внешний progress ledger, diff или
+test/review receipts. Production launcher подключён через
+`qwen_runtime_adapter.py`: он сверяет task/scope/baseline/diff, canonical
+progress-ledger chain, fresh test/review receipt binding и prior raw-free
+terminal projection до вызова policy. Replay checkpoint/evidence блокируется
+локальными consumed-identity receipts. Локальные fixtures доказывают композицию
+adapter→policy→fresh decision, но не живое продолжение.
+
+Qwen `--json-file` sidecar является временным полным transcript и удаляется
+после projection. Из него сохраняются только raw-free session/counter metrics;
+он не даёт подтверждённого budget-stop reason или loop-clear. Поэтому
+launcher-generated projection с `terminal_reason=null`/`loop_status=UNOBSERVED`
+не разрешает continuation. Без отдельного проверенного Controller terminal
+attestation любой live continuation остаётся fail-closed и NOT_RUN.
 
 Receipt доказывает параметры запуска, но не является свидетельством того, что
 модель поняла или выполнила skill. Независимый Reviewer, ledger и common

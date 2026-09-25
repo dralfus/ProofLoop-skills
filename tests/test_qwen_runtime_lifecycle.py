@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -38,7 +39,7 @@ def make_receipt(
 
 def make_observation(**overrides: object) -> dict[str, object]:
     observation: dict[str, object] = {
-        "session_id": "session-1",
+        "session_id": hashlib.sha256(b"session-1").hexdigest(),
         "turns": 1,
         "tool_calls": 1,
         "wall_time_seconds": 1,
@@ -49,6 +50,30 @@ def make_observation(**overrides: object) -> dict[str, object]:
     }
     observation.update(overrides)
     return observation
+
+
+def make_terminal_evidence(
+    observation: dict[str, object], *, launch_id: str = "a" * 32,
+    terminal_reason: str = "HOST_TOOL_LIMIT",
+) -> dict[str, object]:
+    session_hash = str(observation["session_id"])
+    return {
+        "schema_version": "proofloop.qwen-terminal-receipt.v1",
+        "status": "COMPLETE",
+        "reason": "COMPLETE",
+        "launch_id": launch_id,
+        "session_id_hash": session_hash,
+        "terminal_reason": terminal_reason,
+        "terminal_source": "HOST",
+        "process_exit_code": 0,
+        "event_coverage": "COMPLETE",
+        "turns": observation["turns"],
+        "tool_calls": observation["tool_calls"],
+        "wall_time_seconds": observation["wall_time_seconds"],
+        "loop_status": "HOST_CLEAR",
+        "loop_detector_version": "exact_tool_interaction_cycle_v1",
+        "budget_stop": True,
+    }
 
 
 def make_recon_receipt(
@@ -130,6 +155,69 @@ class QwenRuntimeLifecycleTest(unittest.TestCase):
         payload.update(overrides)
         return payload
 
+    def checkpoint(self, **overrides: object) -> dict[str, object]:
+        fields: dict[str, object] = {
+            "prior_launch_id": "a" * 32,
+            "task_fingerprint": "1" * 64,
+            "scope_fingerprint": "2" * 64,
+            "baseline_commit": "3" * 40,
+            "diff_fingerprint": "4" * 64,
+            "progress_ledger_fingerprint": "5" * 64,
+            "progress_sequence": 1,
+            "progress_evidence_id": "6" * 32,
+            "progress_kind": "LOCAL_GREEN",
+            "next_closure_fingerprint": "7" * 64,
+        }
+        fields.update(overrides)
+        canonical = json.dumps(fields, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        return {"checkpoint_id": hashlib.sha256(canonical.encode("utf-8")).hexdigest(), **fields}
+
+    def rehash_ledger(self, ledger: list[dict[str, object]]) -> dict[str, object]:
+        previous_hash = "GENESIS"
+        for entry in ledger:
+            entry["prev_hash"] = previous_hash
+            unsigned = {key: value for key, value in entry.items() if key != "event_hash"}
+            canonical = json.dumps(unsigned, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+            entry["event_hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            previous_hash = entry["event_hash"]
+        return {"ledger_id": ledger[0]["ledger_id"], "sequence": len(ledger), "head_hash": previous_hash}
+
+    def budget_stop(self, reason: str = "HOST_TOOL_LIMIT") -> dict[str, object]:
+        observation = make_observation(
+            turns=1,
+            tool_calls=20 if reason == "HOST_TOOL_LIMIT" else 1,
+            wall_time_seconds=1800 if reason == "HOST_WALL_LIMIT" else 1,
+            task_fingerprint="1" * 64,
+            scope_fingerprint="2" * 64,
+            baseline_commit="3" * 40,
+            checkpoint=self.checkpoint(),
+        )
+        return self.decide(self.base_payload(
+            observation=observation,
+            terminal_evidence=make_terminal_evidence(observation, terminal_reason=reason),
+        ))
+
+    def continue_from(self, stopped: dict[str, object], **overrides: object) -> dict[str, object]:
+        checkpoint_entry = stopped["ledger"][-2]
+        observation = make_observation(
+            session_id="session-2",
+            continuation=True,
+            fresh_evidence_id="8" * 32,
+            task_fingerprint=checkpoint_entry.get("task_fingerprint", "1" * 64),
+            scope_fingerprint=checkpoint_entry.get("scope_fingerprint", "2" * 64),
+            baseline_commit=checkpoint_entry.get("baseline_commit", "3" * 40),
+            checkpoint_id=checkpoint_entry.get("checkpoint_id", self.checkpoint()["checkpoint_id"]),
+        )
+        observation.update(overrides)
+        return self.decide(
+            self.base_payload(
+                receipt=make_receipt(launch_id="b" * 32, issued_at_utc="2026-09-20T12:00:30.000Z"),
+                ledger=stopped["ledger"],
+                ledger_anchor=stopped["ledger_anchor"],
+                observation=observation,
+            )
+        )
+
     def test_gate_blocks_missing_stale_and_mismatched_receipts_before_dispatch(self) -> None:
         cases = (
             (None, "RECEIPT_MISSING"),
@@ -145,14 +233,20 @@ class QwenRuntimeLifecycleTest(unittest.TestCase):
                 self.assertEqual(result, {"status": "BLOCKED_CAPABILITY", "reason": reason, "role_dispatch": False})
 
     def test_gate_stops_budget_loop_and_repeated_fingerprint_without_new_role_launch(self) -> None:
-        cases = (
-            (make_observation(turns=20), "MAX_SESSION_TURNS_EXHAUSTED"),
-            (make_observation(wall_time_seconds=1800), "MAX_WALL_TIME_EXHAUSTED"),
-            (make_observation(loop_detected=True), "LOOP_DETECTED"),
+        host_cases = (
+            (make_observation(tool_calls=20), "HOST_TOOL_LIMIT"),
+            (make_observation(wall_time_seconds=1800), "HOST_WALL_LIMIT"),
         )
-        for observation, reason in cases:
+        cases = [(observation, reason, make_terminal_evidence(observation, terminal_reason=reason))
+                 for observation, reason in host_cases]
+        loop_observation = make_observation(loop_detected=True)
+        cases.append((loop_observation, "LOOP_DETECTED", None))
+        for observation, reason, terminal_evidence in cases:
             with self.subTest(reason=reason):
-                result = self.decide(self.base_payload(observation=observation))
+                payload = {"observation": observation}
+                if terminal_evidence is not None:
+                    payload["terminal_evidence"] = terminal_evidence
+                result = self.decide(self.base_payload(**payload))
                 self.assertEqual(result["status"], "QWEN_RUNTIME_GUARD_STOP")
                 self.assertEqual(result["reason"], reason)
                 self.assertFalse(result["role_dispatch"])
@@ -170,39 +264,241 @@ class QwenRuntimeLifecycleTest(unittest.TestCase):
         self.assertEqual(repeated["reason"], "REPEATED_TOOL_FINGERPRINT")
         self.assertFalse(repeated["role_dispatch"])
 
-    def test_continuation_requires_new_receipt_and_reproducible_evidence(self) -> None:
-        stopped = self.decide(self.base_payload(observation=make_observation(loop_detected=True)))
-        terminal_ledger = stopped["ledger"]
-        reused = self.decide(
-            self.base_payload(
-                ledger=terminal_ledger,
-                ledger_anchor=stopped["ledger_anchor"],
-                observation=make_observation(continuation=True, fresh_evidence_id="evidence-2"),
-            )
-        )
-        self.assertEqual(reused, {"status": "BLOCKED_CAPABILITY", "reason": "FRESH_SESSION_REQUIRED", "role_dispatch": False})
+    def test_counters_alone_never_infer_host_owned_budget_stop(self) -> None:
+        for observation in (
+            make_observation(turns=20),
+            make_observation(tool_calls=20),
+            make_observation(wall_time_seconds=1800),
+        ):
+            with self.subTest(observation=observation):
+                result = self.decide(self.base_payload(observation=observation))
+                self.assertEqual(result["status"], "QWEN_RUNTIME_GUARD_READY")
+                self.assertTrue(result["role_dispatch"])
+                self.assertNotEqual(result["ledger"][-1].get("event"), "terminal")
 
-        fresh = self.decide(
-            self.base_payload(
-                receipt=make_receipt(launch_id="b" * 32, issued_at_utc="2026-09-20T12:00:30.000Z"),
-                ledger=terminal_ledger,
-                ledger_anchor=stopped["ledger_anchor"],
-                observation=make_observation(continuation=True, fresh_evidence_id="evidence-2"),
-            )
+    def test_host_budget_terminal_requires_complete_matching_receipt(self) -> None:
+        observation = make_observation(tool_calls=20)
+        valid = make_terminal_evidence(observation)
+        invalid_receipts = (
+            {**valid, "status": "BLOCKED"},
+            {**valid, "launch_id": "b" * 32},
+            {**valid, "session_id_hash": "f" * 64},
+            {**valid, "terminal_source": "PROCESS"},
+            {**valid, "event_coverage": "INCOMPLETE"},
+            {**valid, "tool_calls": 19},
+            {**valid, "loop_detector_version": "unknown"},
+            {**valid, "budget_stop": False},
         )
+        for terminal_evidence in invalid_receipts:
+            with self.subTest(terminal_evidence=terminal_evidence):
+                result = self.decide(self.base_payload(
+                    observation=observation,
+                    terminal_evidence=terminal_evidence,
+                ))
+                self.assertEqual(result["status"], "BLOCKED_CAPABILITY")
+                self.assertFalse(result["role_dispatch"])
+
+    def test_normal_exit_terminal_evidence_never_authorizes_role_dispatch(self) -> None:
+        observation = make_observation()
+        terminal_evidence = make_terminal_evidence(observation, terminal_reason="NORMAL_EXIT")
+        terminal_evidence.update(
+            terminal_source="PROCESS",
+            process_exit_code=0,
+            budget_stop=False,
+        )
+
+        result = self.decide(self.base_payload(
+            observation=observation,
+            terminal_evidence=terminal_evidence,
+        ))
+
+        self.assertEqual(result["status"], "QWEN_RUNTIME_GUARD_STOP")
+        self.assertEqual(result["reason"], "NORMAL_EXIT")
+        self.assertFalse(result["role_dispatch"])
+        self.assertEqual(result["ledger"][-1]["event"], "terminal")
+
+    def test_loop_and_repeated_fingerprint_cannot_resume_with_fresh_evidence(self) -> None:
+        stopped = self.decide(self.base_payload(observation=make_observation(loop_detected=True)))
+        reused = self.continue_from(stopped)
+        self.assertEqual(reused["status"], "BLOCKED_CAPABILITY")
+        self.assertFalse(reused["role_dispatch"])
+
+        first = self.decide(self.base_payload())
+        repeated = self.decide(self.base_payload(ledger=first["ledger"], ledger_anchor=first["ledger_anchor"]))
+        self.assertEqual(repeated["reason"], "REPEATED_TOOL_FINGERPRINT")
+        blocked = self.continue_from(repeated)
+        self.assertEqual(blocked["status"], "BLOCKED_CAPABILITY")
+        self.assertFalse(blocked["role_dispatch"])
+
+    def test_budget_stop_requires_valid_checkpoint_for_fresh_session(self) -> None:
+        stopped = self.budget_stop()
+        self.assertEqual(stopped["reason"], "HOST_TOOL_LIMIT")
+        self.assertEqual([event["event"] for event in stopped["ledger"]], ["runtime_observation", "checkpoint", "terminal"])
+        fresh = self.continue_from(stopped)
         self.assertEqual(fresh["status"], "QWEN_RUNTIME_GUARD_READY")
         self.assertTrue(fresh["role_dispatch"])
-        self.assertEqual(fresh["ledger"][-1]["event"], "runtime_observation")
-
+        self.assertEqual(fresh["ledger"][-2]["event"], "session_start")
+        self.assertEqual(len(fresh["ledger"]), len(stopped["ledger"]) + 2)
         next_observation = self.decide(
             self.base_payload(
                 receipt=make_receipt(launch_id="b" * 32, issued_at_utc="2026-09-20T12:00:30.000Z"),
                 ledger=fresh["ledger"],
                 ledger_anchor=fresh["ledger_anchor"],
-                observation=make_observation(session_id="session-2"),
+                observation=make_observation(session_id="session-2", tool_fingerprint="fingerprint-b"),
             )
         )
-        self.assertEqual(next_observation["status"], "QWEN_RUNTIME_GUARD_READY")
+        self.assertEqual(next_observation["status"], "QWEN_RUNTIME_GUARD_READY", next_observation)
+
+    def test_budget_stop_checkpoint_validation_is_fail_closed(self) -> None:
+        invalid_cases = (
+            (self.checkpoint(next_closure_fingerprint=""), "missing closure"),
+            (self.checkpoint(diff_fingerprint="bad"), "invalid hash"),
+            (self.checkpoint(progress_sequence=0), "invalid sequence"),
+            (self.checkpoint(progress_kind="IMPLEMENTED"), "invalid progress kind"),
+            (self.checkpoint(progress_kind=[]), "malformed progress kind"),
+            ({**self.checkpoint(), "checkpoint_id": "0" * 64}, "tampered checkpoint id"),
+            (self.checkpoint(path="secret"), "raw field"),
+        )
+        for checkpoint, label in invalid_cases:
+            with self.subTest(label=label):
+                observation = make_observation(
+                    turns=20,
+                    task_fingerprint="1" * 64,
+                    scope_fingerprint="2" * 64,
+                    baseline_commit="3" * 40,
+                    checkpoint=checkpoint,
+                )
+                result = self.decide(self.base_payload(observation=observation))
+                self.assertEqual(result["status"], "BLOCKED_CAPABILITY")
+
+    def test_continuation_requires_checkpoint_and_unchanged_task_scope_baseline(self) -> None:
+        stopped = self.budget_stop()
+        for overrides in (
+            {"checkpoint_id": "0" * 64},
+            {"task_fingerprint": "9" * 64},
+            {"scope_fingerprint": "9" * 64},
+            {"baseline_commit": "9" * 40},
+            {"fresh_evidence_id": "6" * 32},
+        ):
+            with self.subTest(overrides=overrides):
+                result = self.continue_from(stopped, **overrides)
+                self.assertEqual(result["status"], "BLOCKED_CAPABILITY")
+                self.assertFalse(result["role_dispatch"])
+
+    def test_budget_stop_without_checkpoint_is_not_resumable(self) -> None:
+        observation = make_observation(tool_calls=20)
+        stopped = self.decide(self.base_payload(
+            observation=observation,
+            terminal_evidence=make_terminal_evidence(observation),
+        ))
+        self.assertEqual(stopped["status"], "QWEN_RUNTIME_GUARD_STOP")
+        blocked = self.continue_from(stopped)
+        self.assertEqual(blocked["status"], "BLOCKED_CAPABILITY")
+        self.assertFalse(blocked["role_dispatch"])
+
+    def test_checkpoint_progress_identity_and_context_cannot_be_reused(self) -> None:
+        first_observation = make_observation(
+            tool_calls=20,
+            task_fingerprint="1" * 64,
+            scope_fingerprint="2" * 64,
+            baseline_commit="3" * 40,
+            checkpoint=self.checkpoint(progress_sequence=5),
+        )
+        first = self.decide(self.base_payload(
+            observation=first_observation,
+            terminal_evidence=make_terminal_evidence(first_observation),
+        ))
+        resumed = self.continue_from(first)
+        cases = (
+            (self.checkpoint(prior_launch_id="b" * 32, progress_sequence=5), "sequence reuse"),
+            (self.checkpoint(prior_launch_id="b" * 32, progress_sequence=6), "evidence reuse"),
+            (self.checkpoint(prior_launch_id="b" * 32, progress_sequence=6, task_fingerprint="9" * 64), "task drift"),
+        )
+        for checkpoint, label in cases:
+            with self.subTest(label=label):
+                observation = make_observation(
+                    turns=20,
+                    tool_fingerprint=f"next-{label}",
+                    task_fingerprint="1" * 64,
+                    scope_fingerprint="2" * 64,
+                    baseline_commit="3" * 40,
+                    checkpoint=checkpoint,
+                )
+                result = self.decide(
+                    self.base_payload(
+                        receipt=make_receipt(launch_id="b" * 32, issued_at_utc="2026-09-20T12:00:30.000Z"),
+                        ledger=resumed["ledger"],
+                        ledger_anchor=resumed["ledger_anchor"],
+                        observation=observation,
+                    )
+                )
+                self.assertEqual(result["status"], "BLOCKED_CAPABILITY")
+                self.assertFalse(result["role_dispatch"])
+
+    def test_checkpoint_ledger_rejects_unknown_raw_fields_even_with_valid_hash_chain(self) -> None:
+        stopped = self.budget_stop()
+        ledger = json.loads(json.dumps(stopped["ledger"]))
+        ledger[1]["diff_text"] = "raw diff content"
+        anchor = self.rehash_ledger(ledger)
+        result = self.decide(
+            self.base_payload(
+                receipt=make_receipt(launch_id="b" * 32, issued_at_utc="2026-09-20T12:00:30.000Z"),
+                ledger=ledger,
+                ledger_anchor=anchor,
+                observation=make_observation(
+                    continuation=True,
+                    fresh_evidence_id="8" * 32,
+                    task_fingerprint="1" * 64,
+                    scope_fingerprint="2" * 64,
+                    baseline_commit="3" * 40,
+                    checkpoint_id=ledger[1]["checkpoint_id"],
+                ),
+            )
+        )
+        self.assertEqual(result["status"], "BLOCKED_CAPABILITY")
+        self.assertEqual(result["reason"], "RUNTIME_LEDGER_INVALID")
+        self.assertFalse(result["role_dispatch"])
+
+    def test_runtime_ledger_event_types_reject_unknown_fields_even_with_valid_hash_chain(self) -> None:
+        first = self.decide(self.base_payload())
+        budget_stopped = self.budget_stop()
+        resumed = self.continue_from(budget_stopped)
+        cases = (
+            (first, 0, self.base_payload),
+            (
+                budget_stopped,
+                len(budget_stopped["ledger"]) - 1,
+                lambda **kwargs: self.base_payload(
+                    receipt=make_receipt(launch_id="b" * 32, issued_at_utc="2026-09-20T12:00:30.000Z"),
+                    observation=make_observation(
+                        continuation=True,
+                        fresh_evidence_id="8" * 32,
+                        task_fingerprint="1" * 64,
+                        scope_fingerprint="2" * 64,
+                        baseline_commit="3" * 40,
+                        checkpoint_id=budget_stopped["ledger"][1]["checkpoint_id"],
+                    ),
+                    **kwargs,
+                ),
+            ),
+            (
+                resumed,
+                3,
+                lambda **kwargs: self.base_payload(
+                    receipt=make_receipt(launch_id="b" * 32, issued_at_utc="2026-09-20T12:00:30.000Z"),
+                    observation=make_observation(tool_fingerprint="new-work"),
+                    **kwargs,
+                ),
+            ),
+        )
+        for decision, index, payload_factory in cases:
+            with self.subTest(event=decision["ledger"][index]["event"]):
+                ledger = json.loads(json.dumps(decision["ledger"]))
+                ledger[index]["diff_text"] = "raw content"
+                anchor = self.rehash_ledger(ledger)
+                result = self.decide(payload_factory(ledger=ledger, ledger_anchor=anchor))
+                self.assertEqual(result["status"], "BLOCKED_CAPABILITY")
+                self.assertEqual(result["reason"], "RUNTIME_LEDGER_INVALID")
 
     def test_gate_rejects_tampered_terminal_and_ledger_prefix(self) -> None:
         stopped = self.decide(self.base_payload(observation=make_observation(loop_detected=True)))

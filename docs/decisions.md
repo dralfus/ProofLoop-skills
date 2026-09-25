@@ -1015,3 +1015,283 @@ capability smoke (11/11 markers), а bounded recon вернул
 write/dispatch/acceptance flags. Protocol pilot не является read-only и
 документированная процедура включает Implementer/acceptance; до отдельного
 согласования этой границы он остаётся NOT_RUN.
+
+## D047 — Progress-gated continuation after Qwen session budget stop
+
+Статус: принято владельцем 2026-09-24.
+
+Наблюдаемый failure mode: один фиксированный protocol-session budget может
+остановить сложную задачу при доказуемом progress; простой reset counters и
+повтор неизменного входа, напротив, не отличает продуктивное продолжение от
+loop. Текущий runtime guard требует fresh receipt после terminal, но ранее
+принимал его после `LOOP_DETECTED` и не связывал continuation с проверенным
+progress/task scope.
+
+Решение: оставить per-session ceiling `20 turns / 20 tool calls / 30m /
+depth 1`; разрешать новую session только после `MAX_SESSION_TURNS_EXHAUSTED`,
+`MAX_TOOL_CALLS_EXHAUSTED` или `MAX_WALL_TIME_EXHAUSTED` и Controller-verified
+raw-free checkpoint. Checkpoint связывает launch, неизменные task/scope/baseline,
+diff, append-only progress ledger/sequence, новый evidence id, допустимый
+`LOCAL_GREEN`/`REVIEW_CONTINUE` и один следующий closure. `LOOP_DETECTED` и
+`REPEATED_TOOL_FINGERPRINT` остаются terminal. Новый receipt не сбрасывает
+историю и counters. Пользовательские Qwen settings, provider, reasoning,
+sampling, role profile и внешние Qwen/Stepler files не меняются.
+
+Измеримый критерий policy slice: валидный checkpoint открывает только новую
+session с неизменным task/scope/baseline; отсутствующий, replayed, tampered,
+regression, non-progress или loop evidence блокирует dispatch. Append-only
+ledger сохраняет все прежние observations и terminal причины. Runtime policy
+принимает только Controller-attested evidence и не перепроверяет внешний
+progress ledger/worktree/review receipt; native launcher пока не подключён.
+Local fixtures доказывают policy contract, но не native continuation и не
+improvement в живой работе. Следующая задача — native adapter integration,
+после неё отдельный live multi-repair Qwen pilot.
+
+## D048 — Native Qwen checkpoint integration is host-verified and fail-closed
+
+Статус: принято владельцем 2026-09-24.
+
+Наблюдаемый failure mode: Ticket 22 runtime policy проверяет hashes и
+append-only runtime ledger, но не читает текущий worktree, canonical progress
+ledger или test/review receipts. Production protocol launcher не вызывал эту
+policy и подавлял весь Qwen output. Opaque Controller hashes сами по себе не
+доказывают ни текущий diff, ни прогресс.
+
+Решение: добавить host-side continuation adapter, который пересчитывает
+task/scope/baseline/diff fingerprints, проверяет progress-ledger chain и typed
+fresh receipt bindings и только затем вызывает Ticket 22 policy. Native
+launcher разрешает dispatch только при `QWEN_RUNTIME_GUARD_READY`; checkpoint и
+progress-evidence identities помечаются как consumed. Для наблюдения session
+используется Qwen `--json-file`, но sidecar является полным чувствительным
+transcript: он временен, обрабатывается raw-free и удаляется. Continuation
+context передаётся отдельно только в prompt, не попадая в receipt/ledger.
+
+Ограничение доказательства: текущий projection фиксирует session/counters, но
+не устанавливает terminal budget reason или loop-clear. `session_end` не
+считается budget stop. Неизвестный, неполный либо не связанный с runtime ledger
+terminal projection блокирует continuation. Поэтому локальный READY fixture
+доказывает adapter→policy композицию, но live Qwen multi-repair продолжает
+оставаться отдельным NOT_RUN gate до подтверждённого источника terminal
+evidence.
+
+Актуализация evidence 2026-09-24: официальный Qwen Code `v0.24.4` native
+`--json-file` sidecar не содержит typed budget-stop reason или явного loop
+state. Headless `-p` output не эквивалентен native path, а exit `55` не
+различает wall-time и tool-call budgets. Отсутствие события не доказывает
+`CLEAR`; Ticket 24 остаётся `BLOCKED_EVIDENCE_SOURCE` до availability либо
+отдельно одобренного совместимого terminal source. См.
+`docs/research/qwen-v0244-dual-output-terminal-evidence.md`.
+
+Измеримые критерии: каждый task/scope/baseline/diff/progress/test/review
+mismatch блокирует dispatch; valid fixture создаёт fresh decision и сохраняет
+предыдущие counters/events; loop/repeated fingerprint и replay остаются
+terminal; fake launcher доказывает нулевой Qwen dispatch при блокировке; ни raw
+event, ни continuation packet не попадают в постоянные receipts.
+
+## D049 — Native protocol получает API key только из Windows Credential Manager
+
+Статус: локально исправлено и regression tests RED→GREEN; bounded protocol
+pilot остановился до model dispatch.
+
+Наблюдаемый failure mode: native `protocol` launcher вызывал Qwen CLI, но не
+читал Windows Credential Manager. В `recon` такой read уже существовал. В
+результате успешная ручная аутентификация и recon не доказывали, что protocol
+child получает API key; верхний launcher также терял настроенный
+`CredentialTarget`. Официальный Qwen Code auth contract для OpenAI-compatible
+provider разрешает API key из `OPENAI_API_KEY`, а не из Windows Credential
+Manager напрямую. Единственный bounded protocol attempt дополнительно
+остановился до Qwen request: `.NET SpecialFolder.UserProfile` не совпал с
+`USERPROFILE`, где расположен пользовательский Qwen config.
+
+Решение: перед native Qwen `protocol` dispatch прочитать Generic Credential
+для настроенного target, передать его как `OPENAI_API_KEY` дочернему процессу
+Qwen, а сразу после его возврата восстановить или удалить прежнее process
+значение до projection/любых других subprocess; `finally` страхует исключения.
+Передать `CredentialTarget` через оба launcher слоя; default `SettingsPath`
+строить от `USERPROFILE`. Не записывать ключ в environment пользователя,
+settings, receipts или logs; protocol не меняет endpoint/model и sampling. Для
+`recon` сохраняется его существующий process-scoped endpoint/model contract.
+
+Почему прежние gates это пропустили: protocol fixtures проверяли argv, budget,
+sidecar и raw-free projection, но не наблюдали credential resolution и
+конфайнмент секрета на границах child processes; credential fixture покрывал
+другой adapter. Launcher tests передавали `SettingsPath` явно и не проверяли
+Windows profile default.
+
+Измеримый критерий: fake native launcher с изолированным fake Credential
+Manager проходит `BLOCKED/RED → QWEN_SESSION_GUARD_READY/GREEN`, Qwen child
+видит fixture secret, а следующий Python projector — нет; исходное process
+environment восстановлено, custom target доходит без drift, stdout/stderr и
+permanent evidence не содержат fixture key. Default-path regression фиксирует
+`USERPROFILE`. Реальный протокол запускается отдельно только после этого
+локального gate; запуск после terminal guard failure не повторяется
+автоматически.
+
+## D050 — Сохранять raw-free terminal evidence protocol при fail-closed projection
+
+Статус: реализовано локально, regression-tested 2026-09-24.
+
+Наблюдаемый failure mode: runtime adapter намеренно завершает процесс кодом
+`3`, когда выдаёт валидную raw-free projection со статусом
+`BLOCKED_CAPABILITY`. CLI compatibility layer считала любой ненулевой code
+ошибкой самого projector и заменяла его JSON на общий
+`QWEN_RUNTIME_EVIDENCE_UNSUPPORTED`. В результате верхний launcher терял
+причину, доступные counters и exit code Qwen. Дополнительный regression также
+выявил strict-mode access к необязательному `reason` у обычной успешной
+projection.
+
+Решение: принимать adapter codes `0` и `3` только при наличии валидного JSON,
+при этом `3` остаётся fail-closed outcome и не даёт dispatch authority. Для
+terminal `type=result` с `is_error=true` извлекать только raw-free
+`subtype`, presence/category `error.message`, hashed session id, counters,
+wall time и tool fingerprint; `error.message`, transcript, URL, token и
+session id не сохранять. Child и parent передают numeric Qwen/projector exit
+codes и parse/output booleans по allowlist. Неизвестный code, malformed JSON
+или unsupported schema остаются blocked.
+
+Почему прежние gates это пропустили: tests покрывали pure projection и
+успешный adapter subprocess отдельно, но не совместный terminal-failure путь
+через exit code `3`, PowerShell CLI bridge и parent status serializer.
+
+Критерий: synthetic native launcher с error envelope (`HTTP 403`, private URL
+и fixture token) проходит RED→GREEN на полном adapter→CLI→parent пути; status
+остаётся `QWEN_COMMAND_FAILED`, reason становится `QWEN_JSON_ERROR_RESULT`,
+доступные counters/exit codes присутствуют, а текст ошибки/URL/token нигде не
+публикуются. Этот критерий улучшает локальную диагностику, но не устанавливает
+задним числом причину предшествующего live Qwen failure и не отменяет запрет
+на автоматический retry.
+
+## D051 — Host-owned terminal evidence как отдельный источник Qwen continuation
+
+Статус: принято владельцем 2026-09-25; runtime-реализация локально выполнена
+и прошла local verification; live gate Ticket 24 остаётся отдельным.
+
+Наблюдаемый failure mode: native Qwen `--json-file` contract не предоставляет
+проверяемые typed budget-stop reason и positive loop-clear. Текущий launcher
+синхронно вызывает Qwen, читает event sidecar после завершения и потому не
+может утверждать, что сам остановил процесс по wall/tool ceiling. `session_end`,
+обычный exit и отсутствие loop-события не заменяют эти факты.
+
+Решение: для continuation допускается отдельно доказанный host-owned evidence
+source как альтернатива native Qwen signal, но не как его эмуляция. Он обязан
+связать launch/session, типизированную host stop action, завершение именно
+этого child process, полное покрытие event stream и raw-free receipt. `HOST_CLEAR`
+может быть eligible loop evidence только как результат явного, версионируемого
+host detector, завершившего анализ полного потока. Это утверждение ограничено
+правилами detector и не является `NATIVE_CLEAR` или гарантией отсутствия любого
+возможного цикла. Неполнота, неизвестность, противоречие либо неупорядоченная
+гонка дают `UNKNOWN` и запрещают continuation. `NORMAL_EXIT` не является budget
+stop и не открывает budget continuation.
+
+На момент принятия решение фиксировало целевую evidence semantics, но не
+доказывало наличие source. До implementation, полного локального
+fake-process/evidence suite и отдельного bounded live gate Ticket 24 оставался
+`BLOCKED_EVIDENCE_SOURCE` / `NOT_RUN`.
+Process supervision обязан сохранить native TUI mode и не менять Qwen settings,
+provider, credentials, sampling, reasoning, role profile или loop-detection
+configuration. Если supervisor не может доказать process ownership, event
+completeness и TUI compatibility, host source считается unsupported; применяется
+существующий fail-closed путь.
+
+Дополнительный completeness gate: опубликованный Qwen Dual Output contract
+допускает adapter exception, отключающий event bridge без `session_end`. Поэтому
+для host-issued stop supervisor обязан зафиксировать stop intent при живом child,
+снять `event_file_bytes_at_stop` до graceful interrupt и получить matching
+`session_end`, начинающийся не раньше этого offset и завершающийся до полного
+process-tree exit. Размер снимается до сигнала: fake-child показал, что при
+быстром graceful response `session_end` может начать записываться между сигналом
+и post-signal size sample, оставляя cutoff внутри его JSONL-строки. Последняя
+проверка child liveness перед сигналом и line-boundary validation закрывают
+наблюдаемый race; offset должен совпадать с границей полной JSONL-строки. Отсутствующий
+post-stop `session_end`, timeout с force-kill или неоднозначная последовательность
+дают `INCOMPLETE`/`UNKNOWN`; закрытия файла недостаточно для continuation.
+
+Проверенные локальные fixtures для `exact_tool_interaction_cycle_v1` обязаны
+защищать обычные повторы: одинаковые tool name/input при разных результатах,
+одинаковых результатах с разным assistant content и только две идентичные
+завершённые interaction cycles не являются `DETECTED`. Три полные идентичные
+cycles дают только terminal classification; detector не посылает signal
+работающему child. Намеренный workflow с тремя совершенно одинаковыми cycles
+остаётся явным риском false positive для continuation, не для живого действия.
+
+Измеримые критерии реализации: (1) fake process покрывает wall/tool stop,
+normal exit, interrupt, crash и races; неоднозначные случаи дают `UNKNOWN`;
+(2) raw-free receipt связан с launch/session and checkpoint identities и не
+содержит prompt, transcript, tool payloads, paths, credentials или raw errors;
+(3) host detector выдаёт `HOST_CLEAR` только при `event_coverage=COMPLETE`,
+идентичной session и завершённом versioned analysis; missing/unknown/malformed
+events блокируют; (4) runtime dispatch остаётся нулевым на любом unsupported
+или blocked receipt; (5) fixtures не выдаются за live Qwen proof.
+
+Implementation ruling по запросу владельца 2026-09-25: первоначальный
+fingerprint только `{tool name, input}` отклонён как слишком широкий — одинаковые
+read/check действия возможны в нормальной работе, а один fingerprint игнорирует
+tool result и текст assistant. Для реализации выбран versioned detector
+`exact_tool_interaction_cycle_v1`: он сравнивает три соседних завершённых
+assistant tool-use/result cycle, связывает каждый result с `tool_use_id` и
+включает нормализованный assistant content, ordered tool names/inputs и matched
+result content/`is_error`; уникальные IDs исключаются. Несвязанный, неизвестный,
+неполный либо потенциально усечённый cycle даёт `UNKNOWN`. Этот детектор только
+классифицирует полный terminal stream и никогда не останавливает процесс;
+process stop остаётся только за typed wall/tool ceilings, причём tool ceiling
+считается по завершённым use/result парам.
+
+Остаточный риск: любой эвристический detector может совпасть с намеренным
+повтором полного interaction cycle или пропустить цикл, меняющий содержимое.
+Это не oracle намерения; версия и ограниченная семантика должны быть видны в
+receipt и тестах. Локальная матрица обязана показать отсутствие срабатывания на
+одинаковых действиях с разными результатами и на одинаковых действиях/результатах
+с различным assistant content. Основание и таблицы terminal evidence находятся в
+`docs/superpowers/specs/2026-09-25-qwen-host-owned-terminal-evidence-design.md`.
+
+Implementation finding, 2026-09-25: первый supervisor запускал `.cmd`
+через shell-compatible путь. Fake-child regression показал, что многострочный prompt
+и `%PATH%`/кавычки/метасимволы изменяются на пути через `cmd.exe`; тот же путь
+мог исполнить произвольный неизвестный batch wrapper. Принятое узкое исправление:
+для известного Qwen `qwen.cmd` npm-style Node shim распознаётся точная форма
+wrapper и фиксированный `node_modules\@qwen-code\qwen-code\cli-entry.js`,
+после чего supervisor вызывает найденный `node.exe` напрямую с entrypoint и
+неизменённым argv. Protocol capability `--help` preflight использует тот же
+direct-Node adapter до любого исполнения Qwen-команды. `.ps1` и `.exe` также
+остаются прямыми дочерними процессами. Неизвестный `.cmd`, изменившаяся форма
+или отсутствующий Node/entrypoint блокируются до исполнения, включая ранний
+preflight; shell fallback запрещён. Критерий: fake Node
+получает исходные argv values, включая newline, кавычки, `%PATH%`, `^`, `|`, `!`;
+неизвестный wrapper не исполняется ни на capability preflight, ни при child
+launch; установленный shim проходит только read-only recognition. Полный
+launcher regression проверяет `QWEN_CLI_UNAVAILABLE` до marker side effect.
+Стандартные потоки, process-group/job ownership и native protocol argv
+подтверждаются fake-child tests; эти tests не выполняют Qwen CLI или model
+request.
+
+Implementation status, 2026-09-25: локальные host-owned receipt, loop detector,
+checkpoint binding, supervisor wiring и canonical/operator documentation
+прошли full local test suite (`224/224`), documentation/invocation-contract
+tests (`74/74`), plugin validation (exit 0), PowerShell AST parsing
+(`3/3`) и `git diff --check`. Отдельный direct-Node transport test
+прошёл после добавления проверки redirected console flags; дополнительный
+full-launcher regression блокирует неизвестную обёртку на capability preflight
+до любых side effects. Ни Qwen CLI, ни модель не запускались;
+settings/provider/auth не менялись. Ticket 24 остаётся
+`BLOCKED_EVIDENCE_SOURCE` / `NOT_RUN`, потому что реальный native Qwen
+process/event-stream compatibility pilot не выполнялся.
+
+Live implementation finding, 2026-09-25: после этого был выполнен один
+bounded disposable protocol launch. Он завершился `QWEN_COMMAND_FAILED` за
+1478 ms; `turn_count` и `tool_call_count` были `NOT_AVAILABLE`,
+`session_ended=false`, `loop_status=UNOBSERVED`, `budget_stop=false`, а typed
+Qwen/projector exit code, error category и runtime projection отсутствовали.
+В receipt directory сохранился только предзапусковой `QWEN_SESSION_GUARD`.
+Фактическая причина — child launch, provider/transport failure или event capture
+— по имеющимся raw-free данным неразличима.
+
+Минимальная коррекция evidence path: parent сохраняет отдельный versioned
+`QWEN_TERMINAL_OUTCOME` при nonzero/unsupported protocol outcome; запись идёт
+через временный файл с rename и возвращает `terminal_receipt_written`. Receipt
+может содержать parent failure и явные unavailable counters/runtime fields, не
+выдавая их за Qwen runtime event projection. Synthetic regression до изменения
+был RED, после — GREEN; он проверяет сохранение
+`QWEN_JSON_ERROR_RESULT`/`auth_or_forbidden` и отсутствие URL, token и raw
+message. Это устраняет потерю доступного failure evidence, но не устанавливает
+задним числом первопричину и не разрешает retry.
+Ticket 24 остаётся заблокирован до отдельного bounded live gate.

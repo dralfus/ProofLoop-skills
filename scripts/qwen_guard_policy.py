@@ -34,6 +34,7 @@ CAPABILITY_MARKERS = {
             "--max-tool-calls",
             "--max-wall-time",
             "--max-subagent-depth",
+            "--json-file",
         }
     ),
     "recon": frozenset(

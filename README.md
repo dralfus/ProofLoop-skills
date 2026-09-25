@@ -87,10 +87,43 @@ qwen extensions install .
 в `docs/experiments/qwen-code-v0222-pilot.md`. CLI доступен владельцу; полный
 role-lifecycle pilot пока не выполнялся.
 
+Guarded launcher берёт API key из Windows Credential Manager только для
+дочернего процесса Qwen и восстанавливает исходный environment сразу после
+его возврата — до projection/других subprocess (с `finally` как защитой при
+ошибке); ключ не записывается в settings или постоянные receipts.
+
 Для отдельного bounded анализа launcher поддерживает explicit native `recon`
 mode: clean fixed-point worktree, `qwen.cmd`, plan-mode tool exclusions,
 structured JSON/schema и малый budget. Recon не запускает `/finish-ticket`,
 role-agent или acceptance; existing `protocol` argv contract остаётся exact.
+
+Локальный bounded protocol attempt Ticket 18 завершился
+`QWEN_COMMAND_FAILED`; исходная причина не установлена, повторного запуска не
+было. D050 исправляет raw-free сбор error-envelope evidence: valid fail-closed
+projection adapter с exit code `3` больше не теряется как общий unsupported.
+Синтетический end-to-end тест проверяет safe classification/counters/exit
+codes и отсутствие raw message, но не превращает live attempt в PASS.
+
+Protocol checkpoint continuation использует host-owned terminal receipt:
+supervisor владеет child process tree, читает только полные записи временного
+`--json-file` sidecar и напрямую запускает только распознанный Node-shim
+`qwen.cmd`. Continuation требует `HOST_WALL_LIMIT` или `HOST_TOOL_LIMIT`,
+полного `event_coverage=COMPLETE`, закрытого process tree, post-stop
+`session_end`, `HOST_CLEAR` от `exact_tool_interaction_cycle_v1` и актуальных
+worktree/progress/test/review evidence. `NORMAL_EXIT`, `DETECTED`, `UNKNOWN`,
+`INCOMPLETE` и неизвестный wrapper остаются fail-closed. Настройки Qwen и
+protocol argv не меняются.
+Protocol capability `--help` preflight использует тот же проверенный adapter;
+неизвестный `.cmd` отклоняется до исполнения.
+
+Локальная host implementation проверена fake-process/evidence suite; live
+multi-repair continuation Ticket 24 остаётся `BLOCKED_EVIDENCE_SOURCE` и пока
+`NOT_RUN`: отдельный disposable protocol launch 2026-09-25 завершился
+`QWEN_COMMAND_FAILED` до eligible terminal evidence. Counters были unavailable,
+`loop_status=UNOBSERVED`, `budget_stop=false`; причина отказа неизвестна.
+Локальные fixtures не являются live proof. Исследования native terminal output:
+`docs/research/qwen-v0245-terminal-evidence-refresh-20260925.md` и
+`docs/research/qwen-v0244-dual-output-terminal-evidence.md`.
 
 ## Лицензия
 

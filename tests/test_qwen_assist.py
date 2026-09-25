@@ -483,6 +483,22 @@ class QwenAssistTest(unittest.TestCase):
             {"status": "QWEN_UNUSABLE", "reason": "GIT_INTEGRATION_FORBIDDEN"},
         )
 
+    def test_patch_candidate_rejects_zero_changed_lines(self) -> None:
+        candidate = {
+            "successful_recon": True,
+            "files": ["tests/test_qwen_assist.py"],
+            "changed_lines": 0,
+            "targeted_tests": [
+                "python -m unittest tests.test_qwen_assist.QwenAssistTest.test_patch_candidate_rejects_zero_changed_lines"
+            ],
+            "git_operations": [],
+            "full_suite": False,
+        }
+
+        self.assertEqual(
+            QWEN_ASSIST.validate_patch_candidate(candidate),
+            {"status": "QWEN_UNUSABLE", "reason": "PATCH_SCOPE_EXCEEDED"},
+        )
 
     def test_metrics_store_only_anonymized_fields(self) -> None:
         metric = QWEN_ASSIST.anonymize_metric(
