@@ -25,7 +25,7 @@ class QwenGuardPolicyTest(unittest.TestCase):
             "mode": mode,
             "limits": dict(limits),
             "loop_detection": True,
-            "extension_available": True,
+            ("finish_ticket_skill_available" if mode == "protocol" else "extension_available"): True,
         }
         worktree: dict[str, object] = {"available": True}
         if mode == "recon":
@@ -78,7 +78,71 @@ class QwenGuardPolicyTest(unittest.TestCase):
         self.assertFalse(recon["acceptance"])
         self.assertTrue(recon["read_only"])
 
+    def test_expanded_budget_requires_matching_pilot_receipt_and_keeps_user_setting(self) -> None:
+        payload = self.payload(protocol_budget_profile="pilot-expanded")
+        receipt = dict(payload["receipt"])
+        receipt["receipt_version"] = 2
+        receipt["budget_profile"] = "pilot-expanded"
+        receipt["limits"] = {**POLICY.PROTOCOL_LIMITS, "max_tool_calls": 40}
+        payload["receipt"] = receipt
+
+        decision = POLICY.evaluate_guard_policy(payload)
+
+        self.assertEqual(decision["status"], "QWEN_GUARD_READY")
+        self.assertEqual(decision["limits"]["max_tool_calls"], 40)
+        self.assertEqual(payload["settings"]["maxToolCallsPerTurn"], 20)
+
+        malformed_profile = self.payload(protocol_budget_profile=[])
+        self.assertEqual(
+            POLICY.evaluate_guard_policy(malformed_profile),
+            POLICY.blocked("PROTOCOL_BUDGET_PROFILE_INVALID"),
+        )
+
+        mismatched = self.payload(protocol_budget_profile="pilot-expanded")
+        wrong_receipt = dict(mismatched["receipt"])
+        wrong_receipt["receipt_version"] = 2
+        wrong_receipt["budget_profile"] = "standard"
+        wrong_receipt["limits"] = {**POLICY.PROTOCOL_LIMITS, "max_tool_calls": 40}
+        mismatched["receipt"] = wrong_receipt
+        self.assertEqual(
+            POLICY.evaluate_guard_policy(mismatched),
+            POLICY.blocked("RECEIPT_MISMATCHED"),
+        )
+
+    def test_receipts_require_mode_specific_skill_capability_field(self) -> None:
+        protocol = self.payload("protocol")
+        protocol_receipt = dict(protocol["receipt"])
+        protocol_receipt.pop("finish_ticket_skill_available")
+        protocol_receipt["extension_available"] = True
+        protocol["receipt"] = protocol_receipt
+        self.assertEqual(
+            POLICY.evaluate_guard_policy(protocol), POLICY.blocked("RECEIPT_MISMATCHED")
+        )
+
+        recon = self.payload("recon")
+        recon_receipt = dict(recon["receipt"])
+        recon_receipt.pop("extension_available")
+        recon_receipt["finish_ticket_skill_available"] = True
+        recon["receipt"] = recon_receipt
+        self.assertEqual(
+            POLICY.evaluate_guard_policy(recon), POLICY.blocked("RECEIPT_MISMATCHED")
+        )
+
     def test_policy_blocks_unsafe_settings_and_missing_capabilities(self) -> None:
+        self.assertIn("--prompt", POLICY.CAPABILITY_MARKERS["protocol"])
+        self.assertIn("--output-format", POLICY.CAPABILITY_MARKERS["protocol"])
+        self.assertIn("stream-json", POLICY.CAPABILITY_MARKERS["protocol"])
+        self.assertNotIn("--prompt-interactive", POLICY.CAPABILITY_MARKERS["protocol"])
+
+        legacy_markers = list(POLICY.CAPABILITY_MARKERS["protocol"])
+        legacy_markers.remove("--output-format")
+        legacy_markers.remove("stream-json")
+        legacy_markers.extend(("--prompt-interactive", "--json-file"))
+        legacy_result = POLICY.evaluate_guard_policy(
+            self.payload(capabilities={"markers": legacy_markers})
+        )
+        self.assertEqual(legacy_result, POLICY.blocked("QWEN_CLI_CAPABILITY_MISSING"))
+
         for field, value, reason in (
             ("skipLoopDetection", True, "LOOP_DETECTION_DISABLED"),
             ("maxToolCallsPerTurn", 0, "MAX_TOOL_CALLS_INVALID"),

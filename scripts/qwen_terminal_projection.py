@@ -15,8 +15,10 @@ _STRUCTURED_OUTPUT_PATTERN = re.compile(
     r"structured[ _-]?output.*missing"
 )
 _AUTH_PATTERN = re.compile(
-    r"(?i)\b(401|403)\b|unauthori[sz]ed|forbidden|api[\s_-]*key|"
-    r"authentication|bearer|token"
+    r"(?i)\b(?:http\s*)?(?:401|403)\b|unauthori[sz]ed|forbidden|"
+    r"(?:authentication|authorization)\s+(?:failed|failure|error|denied|rejected)|"
+    r"(?:invalid|missing|expired|revoked|rejected)\s+(?:(?:api|openai)[\s_-]*)?(?:key|token)|"
+    r"(?:(?:api|openai)[\s_-]*)?(?:key|token)\s+(?:is\s+)?(?:invalid|missing|expired|revoked|rejected)"
 )
 _TRANSPORT_PATTERN = re.compile(
     r"(?i)\b5\d\d\b|websocket|https?://|fetch failed|timed? ?out|"
@@ -77,6 +79,16 @@ def _error_message(terminal: dict[str, object]) -> tuple[str, str, bool]:
     return message, "other" if present else "none", False
 
 
+def _raw_text_category(output: str) -> str:
+    if _STRUCTURED_OUTPUT_PATTERN.search(output):
+        return "structured_output_missing"
+    if _AUTH_PATTERN.search(output):
+        return "auth_or_forbidden"
+    if _TRANSPORT_PATTERN.search(output):
+        return "transport"
+    return "other" if output.strip() else "none"
+
+
 def inspect_output(output: object) -> dict[str, object]:
     present, is_json, shape, parsed = _parse_output(output)
     terminal, is_envelope = _terminal(parsed)
@@ -119,6 +131,13 @@ def inspect_output(output: object) -> dict[str, object]:
         if _STRUCTURED_OUTPUT_PATTERN.search(output):
             inspection["structured_output_marker"] = True
             inspection["error_message_category"] = "structured_output_missing"
+    if present and isinstance(output, str) and not inspection["error_message_present"]:
+        category = _raw_text_category(output)
+        if category != "none":
+            inspection["error_message_present"] = True
+            inspection["error_message_category"] = category
+            if category == "structured_output_missing":
+                inspection["structured_output_marker"] = True
     return inspection
 
 
@@ -154,6 +173,20 @@ def project_failure(stdout: object, stderr: object) -> dict[str, object]:
         value = stdout_inspection[inspection_key]
         return value if value not in (False, "none") else stderr_inspection[inspection_key] or default
 
+    message_categories = {
+        stdout_inspection["error_message_category"],
+        stderr_inspection["error_message_category"],
+    }
+    error_message_category = next(
+        (
+            category for category in (
+                "structured_output_missing", "auth_or_forbidden", "transport", "other"
+            )
+            if category in message_categories
+        ),
+        "none",
+    )
+
     diagnostic = {
         "stdout_present": bool(stdout_inspection["present"]),
         "stderr_present": bool(stderr_inspection["present"]),
@@ -165,7 +198,7 @@ def project_failure(stdout: object, stderr: object) -> dict[str, object]:
         "terminal_is_error": json_error,
         "terminal_subtype": first("terminal_subtype", "none"),
         "error_message_present": bool(stdout_inspection["error_message_present"] or stderr_inspection["error_message_present"]),
-        "error_message_category": first("error_message_category", "none"),
+        "error_message_category": error_message_category,
         "envelope_is_error": bool(stdout_inspection["envelope_is_error"] or stderr_inspection["envelope_is_error"]),
         "envelope_subtype": first("envelope_subtype", "none"),
         "envelope_error_message_present": bool(stdout_inspection["envelope_error_message_present"] or stderr_inspection["envelope_error_message_present"]),

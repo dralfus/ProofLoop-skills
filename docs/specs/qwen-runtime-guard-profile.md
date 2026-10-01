@@ -125,13 +125,44 @@ Exact `protocol` argv contract и его `QWEN_SESSION_GUARD` receipt остаю
 runtime budget (`3 turns / 6 tools / 5m`), сохраняя configured Qwen
 thinking/reasoning. Его не нужно отключать или переопределять ради этого режима.
 `protocol` предназначен для Controller, skill-heavy анализа и repair: thinking
-включён, а output limit не меньше 8000. Решение D046 заменяет прежнее требование
-явного отключения thinking в `recon`.
+включён; ProofLoop не задаёт отдельный output-token cap и наследует модельный
+budget Qwen. Решение D046 заменяет прежнее требование явного отключения
+thinking в `recon`; решение D061 снимает фиксированный protocol output cap.
 
 Sampling (`temperature`, `top_p`, `top_k`, penalties) ProofLoop не задаёт:
 серверные defaults являются источником истины. Packet передаётся на английском
 языке с явным требованием ответить по-русски. Указанные модельные имена служат
 операторскими примерами, а не version/model allow-list.
+
+Headless stream-json может содержать assistant `thinking` blocks. Host projector
+принимает только строковый payload, затем отбрасывает его до raw-free receipt,
+role projection и loop fingerprint; malformed/unknown blocks остаются
+fail-closed. Это поддержка схемы, а не версия CLI allow-list и не изменение
+reasoning settings. См. D062 в `docs/decisions.md`.
+
+`QWEN_TERMINAL_OUTCOME` v5 сохраняет конечный allowlisted `cli_stage` для
+диагностики ошибок CLI bridge до старта child process. При fail-closed
+projection дополнительно разрешены raw-free counters только по полностью
+распознанному JSONL prefix и отдельный allowlisted `runtime_projection_reason`.
+Malformed или оборванная запись не считается; raw exceptions, credentials,
+event values и streams не сохраняются. Эти поля не являются terminal,
+lifecycle или continuation evidence. Диагностика не разрешает retry
+автоматически; подробности — D063/D066/D067/D068 в
+`docs/decisions.md`.
+
+Protocol CLI consumer выполняется в отдельном текущем PowerShell host, чтобы
+изолировать Credential Manager lookup от parent runspace; D064 отмечает, что
+исходная причина предыдущих lookup failures остаётся неподтверждённой.
+Continuation packet передаётся только через краткоживущий UTF-8 temp file,
+удаляемый после dispatch; лимит `14,000 UTF-8 bytes` удерживает prompt в
+Windows command-line envelope и не является модельным budget (D065).
+
+Обычный protocol остаётся ограничен `20 turns / 20 tool calls / 30m / depth 1`.
+Отдельный receipt-bound `pilot-expanded` профиль для одного disposable
+Ticket 314 regression pilot повышает только tool-call предел до 40; он
+fail-closed ограничен `qwen-protocol-pilot-ticket.md` и test-only markers под
+`.scratch`. Ни launcher, ни Controller не меняют пользовательский
+`model.maxToolCallsPerTurn` (D066).
 
 Для Ticket 18 controlled fixture declaration owner-authorized configured/active
 identity — `qwen38-flash-next`, source `USER_AUTHORIZED_CONFIGURATION`. Это не

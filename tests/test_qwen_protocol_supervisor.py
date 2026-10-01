@@ -22,6 +22,7 @@ class QwenProtocolSupervisorTest(unittest.TestCase):
         self, *, scenario: str, max_tools: int = 20, wall_seconds: int = 10,
         extra_arguments: tuple[str, ...] = (),
         command_kind: str = "ps1",
+        show_output: bool = False,
     ) -> tuple[dict[str, object], str, str, list[str], dict[str, bool]]:
         with tempfile.TemporaryDirectory(prefix="proofloop qwen supervisor ") as directory:
             root = Path(directory)
@@ -31,6 +32,12 @@ class QwenProtocolSupervisorTest(unittest.TestCase):
             runner_path = root / "run supervisor.ps1"
             arguments_path = root / "observed arguments.json"
             console_path = root / "observed console.json"
+            parent_input_path = root / "parent input mode.txt"
+            launch_diagnostic_path = root / "launch diagnostic.json"
+            stdout_capture_path = root / "child stdout.log"
+            stderr_capture_path = root / "child stderr.log"
+            stdout_capture_path.touch()
+            stderr_capture_path.touch()
             unsupported_marker = root / "unsupported wrapper was executed.txt"
             worker_path.write_text(self.fake_worker(scenario), encoding="utf-8")
             if command_kind == "ps1":
@@ -47,31 +54,43 @@ class QwenProtocolSupervisorTest(unittest.TestCase):
                     encoding="utf-8",
                 )
                 command = command_path
+            elif command_kind == "unsupported_type":
+                command = root / "qwen.unsupported"
             else:
                 raise ValueError("unknown command kind")
-            runner_path.write_text(
+            runner_script = (
                 "param()\n"
                 f". '{SUPERVISOR}'\n"
+                "$parentInputRedirected = [Console]::IsInputRedirected\n"
+                "[IO.File]::WriteAllText($env:QWEN_TEST_PARENT_INPUT, $parentInputRedirected.ToString())\n"
                 "$qwenArguments = @('--json-file', $env:QWEN_TEST_EVENT_FILE)\n"
                 "if ($env:QWEN_TEST_EXTRA_ARGUMENTS) { $qwenArguments += @(ConvertFrom-Json -InputObject $env:QWEN_TEST_EXTRA_ARGUMENTS) }\n"
                 "$result = Invoke-QwenProtocolChild `\n"
                 "  -QwenCommand $env:QWEN_TEST_COMMAND `\n"
                 "  -QwenArguments $qwenArguments `\n"
                 "  -EventFilePath $env:QWEN_TEST_EVENT_FILE `\n"
+                "  -StdoutFilePath $env:QWEN_TEST_STDOUT_CAPTURE `\n"
+                "  -StderrFilePath $env:QWEN_TEST_STDERR_CAPTURE `\n"
                 "  -LaunchId ('a' * 32) `\n"
                 f"  -MaxToolCalls {max_tools} `\n"
-                f"  -MaxWallTimeSeconds {wall_seconds}\n"
-                "$result.process_observation | ConvertTo-Json -Compress -Depth 5\n",
-                encoding="utf-8",
+                f"  -MaxWallTimeSeconds {wall_seconds} "
+                + ("-ShowOutput\n" if show_output else "\n")
+                + "$result.process_observation | ConvertTo-Json -Compress -Depth 5\n"
+                + "[IO.File]::WriteAllText($env:QWEN_TEST_LAUNCH_DIAGNOSTIC, ($result.launch_diagnostic | ConvertTo-Json -Compress -Depth 5))\n"
             )
+            runner_path.write_text(runner_script, encoding="utf-8")
             environment = os.environ.copy()
             environment["QWEN_TEST_COMMAND"] = str(command)
             environment["QWEN_TEST_EVENT_FILE"] = str(event_path)
+            environment["QWEN_TEST_STDOUT_CAPTURE"] = str(stdout_capture_path)
+            environment["QWEN_TEST_STDERR_CAPTURE"] = str(stderr_capture_path)
             environment["QWEN_FAKE_WORKER"] = scenario
             environment["QWEN_TEST_EXTRA_ARGUMENTS"] = json.dumps(extra_arguments)
             environment["QWEN_FAKE_ARGS_OUTPUT"] = str(arguments_path)
             environment["QWEN_FAKE_CONSOLE_OUTPUT"] = str(console_path)
             environment["QWEN_FAKE_UNSUPPORTED_MARKER"] = str(unsupported_marker)
+            environment["QWEN_TEST_PARENT_INPUT"] = str(parent_input_path)
+            environment["QWEN_TEST_LAUNCH_DIAGNOSTIC"] = str(launch_diagnostic_path)
             completed = subprocess.run(
                 [PWSH, "-NoProfile", "-File", str(runner_path)],
                 capture_output=True,
@@ -85,6 +104,22 @@ class QwenProtocolSupervisorTest(unittest.TestCase):
             event_text = event_path.read_bytes().decode("utf-8") if event_path.exists() else ""
             observed_arguments = json.loads(arguments_path.read_text(encoding="utf-8")) if arguments_path.exists() else []
             console_observation = json.loads(console_path.read_text(encoding="utf-8")) if console_path.exists() else {}
+            if parent_input_path.exists():
+                console_observation["parent_input_redirected"] = (
+                    parent_input_path.read_text(encoding="utf-8").strip().lower() == "true"
+                )
+            self.last_launch_diagnostic = (
+                json.loads(launch_diagnostic_path.read_text(encoding="utf-8"))
+                if launch_diagnostic_path.exists() else {}
+            )
+            self.last_suppressed_stdout = (
+                stdout_capture_path.read_text(encoding="utf-8")
+                if stdout_capture_path.exists() else ""
+            )
+            self.last_suppressed_stderr = (
+                stderr_capture_path.read_text(encoding="utf-8")
+                if stderr_capture_path.exists() else ""
+            )
             return (
                 json.loads(completed.stdout.strip().splitlines()[-1]),
                 completed.stdout + completed.stderr,
@@ -142,6 +177,18 @@ class QwenProtocolSupervisorTest(unittest.TestCase):
             return common + (
                 "Write-Output 'private-raw-stdout'\n"
                 "Write-Error 'private-raw-stderr'\n"
+                "[IO.File]::AppendAllText($eventPath, '{\"type\":\"system\",\"subtype\":\"session_end\"}' + [char]10, $encoding)\n"
+            )
+        if scenario == "diagnostic_output":
+            return common + (
+                "[Console]::Out.WriteLine('private-raw-stdout')\n"
+                "[Console]::Error.WriteLine('HTTP 403 Forbidden https://private.example/v1 secret-token')\n"
+                "exit 19\n"
+            )
+        if scenario == "visible":
+            return common + (
+                "Write-Output 'VISIBLE_RAW_STDOUT'\n"
+                "Write-Error 'VISIBLE_RAW_STDERR'\n"
                 "[IO.File]::AppendAllText($eventPath, '{\"type\":\"system\",\"subtype\":\"session_end\"}' + [char]10, $encoding)\n"
             )
         if scenario == "partial":
@@ -239,6 +286,22 @@ class QwenProtocolSupervisorTest(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             return json.loads(console_path.read_text(encoding="utf-8"))
 
+    @staticmethod
+    def console_stream_flags(console_observation: dict[str, bool]) -> dict[str, bool]:
+        return {
+            name: console_observation[name]
+            for name in ("input", "output", "error")
+        }
+
+    def test_suppressed_child_output_is_captured_only_for_raw_free_projection(self) -> None:
+        observation, output, _, _, _ = self.run_supervisor(scenario="diagnostic_output")
+
+        self.assertEqual(observation["process_exit_code"], 19)
+        self.assertIn("private-raw-stdout", self.last_suppressed_stdout)
+        self.assertIn("403 Forbidden", self.last_suppressed_stderr)
+        self.assertNotIn("private-raw-stdout", output)
+        self.assertNotIn("secret-token", output)
+
     def test_wall_stop_requires_graceful_post_stop_session_end_and_closed_tree(self) -> None:
         observation, output, event_text, _, _ = self.run_supervisor(scenario="graceful", wall_seconds=1)
 
@@ -290,6 +353,47 @@ class QwenProtocolSupervisorTest(unittest.TestCase):
         self.assertNotIn("private-raw-stdout", output)
         self.assertNotIn("private-raw-stderr", output)
 
+    def test_visible_output_is_explicit_and_keeps_default_suppression(self) -> None:
+        observation, output, _, _, _ = self.run_supervisor(
+            scenario="visible", show_output=True
+        )
+
+        visible_diagnostic = self.last_launch_diagnostic
+        self.assertEqual(visible_diagnostic["console_output_mode"], "VISIBLE")
+        self.assertEqual(visible_diagnostic["supervisor_stage"], "PROCESS_EXITED")
+        self.assertEqual(visible_diagnostic["process_state"], "EXITED")
+        self.assertIn("VISIBLE_RAW_STDOUT", output)
+        self.assertIn("VISIBLE_RAW_STDERR", output)
+        self.assertNotIn("VISIBLE_RAW_STDOUT", json.dumps(visible_diagnostic))
+        self.assertNotIn("VISIBLE_RAW_STDERR", json.dumps(visible_diagnostic))
+
+        default_observation, default_output, _, _, _ = self.run_supervisor(
+            scenario="visible", show_output=False
+        )
+        default_diagnostic = self.last_launch_diagnostic
+        self.assertEqual(default_diagnostic["console_output_mode"], "SUPPRESSED")
+        self.assertNotIn("VISIBLE_RAW_STDOUT", default_output)
+        self.assertNotIn("VISIBLE_RAW_STDERR", default_output)
+
+    def test_visible_output_preserves_parent_stdin_terminal_state(self) -> None:
+        _, _, _, _, console_observation = self.run_supervisor(
+            scenario="visible", show_output=True
+        )
+
+        self.assertEqual(console_observation["input"], console_observation["parent_input_redirected"])
+
+    def test_launch_diagnostic_identifies_command_resolution_failure_without_raw_error(self) -> None:
+        observation, output, _, _, _ = self.run_supervisor(
+            scenario="visible", command_kind="unsupported_type"
+        )
+
+        self.assertFalse(observation["child_started"])
+        self.assertEqual(self.last_launch_diagnostic["supervisor_stage"], "COMMAND_RESOLUTION_FAILED")
+        self.assertEqual(self.last_launch_diagnostic["process_state"], "NOT_STARTED")
+        self.assertIsNone(self.last_launch_diagnostic["process_exit_code"])
+        self.assertEqual(self.last_launch_diagnostic["event_file_state"], "MISSING")
+        self.assertNotIn("unsupported Qwen command type", output)
+
     def test_cmd_argument_quoting_preserves_paths_and_prompt_metacharacters(self) -> None:
         prompt = 'Check "quoted text" & do not expand %PATH%; preserve ^ and | literally!\nContinue on the next line.'
         observation, _, _, arguments, _ = self.run_supervisor(
@@ -311,7 +415,10 @@ class QwenProtocolSupervisorTest(unittest.TestCase):
         self.assertTrue(observation["child_started"], output)
         self.assertTrue(observation["process_exited"], output)
         self.assertEqual(arguments[-2:], ["--prompt", prompt])
-        self.assertEqual(supervised_console, self.run_legacy_console_probe())
+        self.assertEqual(
+            self.console_stream_flags(supervised_console),
+            self.run_legacy_console_probe(),
+        )
         self.assertNotIn("private-session", output)
 
     def test_unrecognized_cmd_wrapper_is_blocked_without_execution(self) -> None:
@@ -327,7 +434,10 @@ class QwenProtocolSupervisorTest(unittest.TestCase):
         _, _, _, _, supervised_console = self.run_supervisor(scenario="normal")
         legacy_console = self.run_legacy_console_probe()
 
-        self.assertEqual(supervised_console, legacy_console)
+        self.assertEqual(
+            self.console_stream_flags(supervised_console),
+            self.console_stream_flags(legacy_console),
+        )
 
     def test_partial_final_line_marks_event_writer_incomplete(self) -> None:
         observation, _, event_text, _, _ = self.run_supervisor(scenario="partial")
@@ -360,7 +470,7 @@ class QwenProtocolSupervisorTest(unittest.TestCase):
 
     def test_incremental_event_tail_counts_only_id_matched_completed_pairs(self) -> None:
         _, _, event_text, _, _ = self.run_supervisor(
-            scenario="tool_wait", max_tools=20, wall_seconds=1
+            scenario="tool_wait", max_tools=1, wall_seconds=10
         )
         with tempfile.TemporaryDirectory(prefix="proofloop qwen tail ") as directory:
             event_path = Path(directory) / "events.jsonl"
@@ -388,6 +498,53 @@ class QwenProtocolSupervisorTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         tail = json.loads(completed.stdout.strip().splitlines()[-1])
         self.assertEqual(tail, {"valid": True, "tool_calls": 1, "pending": 0})
+
+    def test_incremental_event_tail_recognizes_headless_init_and_result_and_rejects_bad_thinking(self) -> None:
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "private-session"},
+            {"type": "assistant", "message": {"content": [
+                {"type": "thinking", "thinking": "private reasoning block"},
+                {"type": "text", "text": "safe response"},
+            ]}},
+            {"type": "result", "subtype": "success", "session_id": "private-session", "is_error": False},
+        ]
+        with tempfile.TemporaryDirectory(prefix="proofloop qwen headless tail ") as directory:
+            event_path = Path(directory) / "events.jsonl"
+            script_path = Path(directory) / "tail.ps1"
+            event_path.write_text("".join(json.dumps(event) + "\n" for event in events), encoding="utf-8")
+            script_path.write_text(
+                f". '{SUPERVISOR}'\n"
+                "$state = @{ offset=0L; line_start=0L; line=[Collections.Generic.List[byte]]::new(); "
+                "pending=[Collections.Generic.Dictionary[string,bool]]::new([StringComparer]::Ordinal); "
+                "seen_tool_ids=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal); "
+                "completed_tool_ids=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal); "
+                "tool_calls=0; session_end_offset=$null; session_started=$false; session_id=$null; valid=$true }\n"
+                f"Update-QwenEventTail -Path '{event_path}' -State $state -MaximumBytes (16 * 1024 * 1024)\n"
+                "@{valid=$state.valid; terminal=($null -ne $state.session_end_offset)} | ConvertTo-Json -Compress\n",
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                [PWSH, "-NoProfile", "-File", str(script_path)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(json.loads(completed.stdout.strip().splitlines()[-1]), {"valid": True, "terminal": True})
+
+            events[1]["message"]["content"][0]["thinking"] = 17
+            event_path.write_text("".join(json.dumps(event) + "\n" for event in events), encoding="utf-8")
+            malformed = subprocess.run(
+                [PWSH, "-NoProfile", "-File", str(script_path)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+
+            self.assertEqual(malformed.returncode, 0, malformed.stderr)
+            self.assertEqual(json.loads(malformed.stdout.strip().splitlines()[-1]), {"valid": False, "terminal": True})
 
     def test_loop_detector_alone_does_not_stop_live_child(self) -> None:
         observation, _, event_text, _, _ = self.run_supervisor(

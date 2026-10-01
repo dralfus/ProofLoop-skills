@@ -23,11 +23,16 @@ from validate_plugin import (  # noqa: E402
     qwen_runtime_guard_decision,
 )
 from qwen_terminal_projection import inspect_output  # noqa: E402
-from qwen_terminal_evidence import project_terminal_receipt  # noqa: E402
+from qwen_terminal_evidence import (  # noqa: E402
+    project_role_lifecycle,
+    project_terminal_receipt,
+)
+from qwen_role_progress_checkpoint import project_role_progress  # noqa: E402
 
 
 MAX_EVENT_BYTES = 16 * 1024 * 1024
 MAX_EVENT_LINE_BYTES = 1024 * 1024
+MAX_CONTINUATION_PACKET_BYTES = 14_000
 RAW_FREE_BLOCK = {"status": "BLOCKED_CAPABILITY", "reason": "QWEN_RUNTIME_EVIDENCE_UNSUPPORTED", "role_dispatch": False}
 _LEDGER_EVENT_FIELDS = frozenset({
     "sequence", "kind", "evidence_id", "task_fingerprint", "scope_fingerprint",
@@ -250,7 +255,7 @@ def prepare_continuation(
     if (
         not isinstance(continuation_context, str)
         or not continuation_context.strip()
-        or len(continuation_context.encode("utf-8")) > 32_768
+        or len(continuation_context.encode("utf-8")) > MAX_CONTINUATION_PACKET_BYTES
     ):
         return {**RAW_FREE_BLOCK, "reason": "CONTROLLER_EVIDENCE_MALFORMED"}
     checkpoint = None
@@ -416,7 +421,7 @@ def project_qwen_events(event_text: str, *, wall_time_seconds: int) -> dict[str,
         event_type = event["type"]
         if event_type == "system":
             subtype = event.get("subtype")
-            if subtype == "session_start":
+            if subtype in {"session_start", "init"}:
                 if line_number != 0:
                     return dict(RAW_FREE_BLOCK)
                 value = event.get("session_id") or (event.get("data", {}).get("session_id") if isinstance(event.get("data"), dict) else None)
@@ -440,11 +445,20 @@ def project_qwen_events(event_text: str, *, wall_time_seconds: int) -> dict[str,
             for block in message["content"]:
                 if not isinstance(block, dict):
                     return dict(RAW_FREE_BLOCK)
-                if block.get("type") == "tool_use":
+                block_type = block.get("type")
+                if block_type == "thinking":
+                    if not isinstance(block.get("thinking"), str):
+                        return dict(RAW_FREE_BLOCK)
+                elif block_type == "text":
+                    if not isinstance(block.get("text"), str):
+                        return dict(RAW_FREE_BLOCK)
+                elif block_type == "tool_use":
                     identity = block.get("id")
                     if not isinstance(identity, str) or not identity:
                         return dict(RAW_FREE_BLOCK)
                     tool_use_ids.add(identity)
+                else:
+                    return dict(RAW_FREE_BLOCK)
         elif event_type == "stream_event":
             nested = event.get("event")
             if not isinstance(nested, dict) or nested.get("type") not in {
@@ -498,6 +512,8 @@ def project_qwen_events(event_text: str, *, wall_time_seconds: int) -> dict[str,
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Raw-free Qwen runtime evidence adapter")
     parser.add_argument("--project-events", type=Path)
+    parser.add_argument("--project-role-lifecycle", type=Path)
+    parser.add_argument("--project-role-progress", type=Path)
     parser.add_argument("--process-observation-file", type=Path)
     parser.add_argument("--wall-time-seconds", type=int, default=0)
     parser.add_argument("--prepare-continuation", type=Path)
@@ -507,7 +523,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--continuation-packet-output", type=Path)
     args = parser.parse_args(argv)
     try:
-        if args.project_events is not None:
+        if args.project_role_lifecycle is not None:
+            if args.project_role_lifecycle.stat().st_size > MAX_EVENT_BYTES or not args.launch_id:
+                result = {
+                    "schema_version": "proofloop.qwen-role-lifecycle.v1",
+                    "status": "BLOCKED",
+                    "reason": "EVENT_STREAM_INCOMPLETE",
+                    "launch_id": args.launch_id if _is_hash(args.launch_id, 32) else "0" * 32,
+                    "session_id_hash": None,
+                    "role_calls": [],
+                    "unclassified_agent_calls": 0,
+                }
+            else:
+                result = project_role_lifecycle(
+                    args.project_role_lifecycle.read_text(encoding="utf-8"),
+                    expected_launch_id=args.launch_id,
+                )
+        elif args.project_role_progress is not None:
+            if args.project_role_progress.stat().st_size > MAX_EVENT_BYTES or not args.launch_id:
+                result = {
+                    "schema_version": "proofloop.qwen-role-progress.v1",
+                    "status": "BLOCKED",
+                    "reason": "EVENT_STREAM_INCOMPLETE",
+                    "launch_id": args.launch_id if _is_hash(args.launch_id, 32) else "0" * 32,
+                    "read_checkpoint_threshold": 6,
+                    "roles": [],
+                }
+            else:
+                result = project_role_progress(
+                    args.project_role_progress.read_text(encoding="utf-8"),
+                    expected_launch_id=args.launch_id,
+                )
+        elif args.project_events is not None:
             if args.project_events.stat().st_size > MAX_EVENT_BYTES:
                 result = dict(RAW_FREE_BLOCK)
             elif args.process_observation_file is not None:

@@ -19,8 +19,8 @@ MODE_RUNTIME_CONTRACTS: dict[str, dict[str, object]] = {
     },
     "protocol": {
         "thinking_policy": "require_configured_reasoning",
-        "output_token_limit": 8000,
-        "process_environment": {"QWEN_CODE_MAX_OUTPUT_TOKENS": "8000"},
+        "output_token_limit": None,
+        "process_environment": {},
         "packet_language": "en",
         "response_language": "ru",
     },

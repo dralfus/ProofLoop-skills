@@ -120,6 +120,10 @@ namespace ProofLoop {
         static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern bool GenerateConsoleCtrlEvent(uint eventType, uint processGroupId);
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetCurrentProcess();
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool DuplicateHandle(IntPtr sourceProcess, IntPtr sourceHandle, IntPtr targetProcess, out IntPtr targetHandle, uint desiredAccess, bool inheritHandle, uint options);
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern bool TerminateJobObject(IntPtr job, uint exitCode);
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -130,6 +134,16 @@ namespace ProofLoop {
         static extern IntPtr GetStdHandle(int handle);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         static extern IntPtr CreateFile(string fileName, uint access, uint shareMode, ref SECURITY_ATTRIBUTES security, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+
+        static IntPtr DuplicateInheritedStandardHandle(int handleId) {
+            IntPtr source = GetStdHandle(handleId);
+            if (source == IntPtr.Zero || source == new IntPtr(-1)) throw new InvalidOperationException("visible console handle unavailable");
+            IntPtr duplicate;
+            if (!DuplicateHandle(GetCurrentProcess(), source, GetCurrentProcess(), out duplicate, 0, true, 2)) {
+                throw new InvalidOperationException("visible console handle unavailable");
+            }
+            return duplicate;
+        }
 
         public static string QuoteArgument(string argument) {
             if (argument == null) return "\"\"";
@@ -169,7 +183,7 @@ namespace ProofLoop {
             return result.ToString();
         }
 
-        public static QwenChildProcess Start(string executable, string commandLine, string currentDirectory) {
+        public static QwenChildProcess Start(string executable, string commandLine, string currentDirectory, bool showOutput, string stdoutFilePath, string stderrFilePath) {
             IntPtr job = CreateJobObject(IntPtr.Zero, null);
             if (job == IntPtr.Zero) throw new InvalidOperationException("job creation failed");
             EXTENDED_LIMIT_INFORMATION limits = new EXTENDED_LIMIT_INFORMATION();
@@ -182,24 +196,62 @@ namespace ProofLoop {
             STARTUPINFO startup = new STARTUPINFO();
             startup.cb = Marshal.SizeOf(typeof(STARTUPINFO));
             startup.dwFlags = STARTF_USESTDHANDLES;
-            startup.hStdInput = GetStdHandle(-10);
-            SECURITY_ATTRIBUTES outputSecurity = new SECURITY_ATTRIBUTES();
-            outputSecurity.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
-            outputSecurity.bInheritHandle = true;
-            IntPtr nullOutput = CreateFile("NUL", 0x40000000, 0x00000003, ref outputSecurity, 3, 0x00000080, IntPtr.Zero);
-            if (nullOutput == IntPtr.Zero || nullOutput == new IntPtr(-1)) {
-                CloseHandle(job);
-                throw new InvalidOperationException("output suppression unavailable");
+            IntPtr capturedOutput = IntPtr.Zero;
+            IntPtr capturedError = IntPtr.Zero;
+            IntPtr inheritedInput = IntPtr.Zero;
+            IntPtr inheritedOutput = IntPtr.Zero;
+            IntPtr inheritedError = IntPtr.Zero;
+            if (showOutput) {
+                try {
+                    inheritedInput = DuplicateInheritedStandardHandle(-10);
+                    inheritedOutput = DuplicateInheritedStandardHandle(-11);
+                    inheritedError = DuplicateInheritedStandardHandle(-12);
+                    startup.hStdInput = inheritedInput;
+                    startup.hStdOutput = inheritedOutput;
+                    startup.hStdError = inheritedError;
+                }
+                catch {
+                    if (inheritedInput != IntPtr.Zero) CloseHandle(inheritedInput);
+                    if (inheritedOutput != IntPtr.Zero) CloseHandle(inheritedOutput);
+                    if (inheritedError != IntPtr.Zero) CloseHandle(inheritedError);
+                    CloseHandle(job);
+                    throw;
+                }
             }
-            startup.hStdOutput = nullOutput;
-            startup.hStdError = nullOutput;
+            else {
+                startup.hStdInput = GetStdHandle(-10);
+                if (String.IsNullOrWhiteSpace(stdoutFilePath) || String.IsNullOrWhiteSpace(stderrFilePath)) {
+                    CloseHandle(job);
+                    throw new InvalidOperationException("suppressed output capture paths unavailable");
+                }
+                SECURITY_ATTRIBUTES outputSecurity = new SECURITY_ATTRIBUTES();
+                outputSecurity.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
+                outputSecurity.bInheritHandle = true;
+                capturedOutput = CreateFile(stdoutFilePath, 0x40000000, 0x00000003, ref outputSecurity, 3, 0x00000080, IntPtr.Zero);
+                if (capturedOutput == IntPtr.Zero || capturedOutput == new IntPtr(-1)) {
+                    CloseHandle(job);
+                    throw new InvalidOperationException("stdout capture unavailable");
+                }
+                capturedError = CreateFile(stderrFilePath, 0x40000000, 0x00000003, ref outputSecurity, 3, 0x00000080, IntPtr.Zero);
+                if (capturedError == IntPtr.Zero || capturedError == new IntPtr(-1)) {
+                    CloseHandle(capturedOutput);
+                    CloseHandle(job);
+                    throw new InvalidOperationException("stderr capture unavailable");
+                }
+                startup.hStdOutput = capturedOutput;
+                startup.hStdError = capturedError;
+            }
             PROCESS_INFORMATION information;
             StringBuilder mutableCommandLine = new StringBuilder(commandLine);
             bool created = CreateProcess(
                 executable, mutableCommandLine, IntPtr.Zero, IntPtr.Zero, true,
                 CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED, IntPtr.Zero,
                 currentDirectory, ref startup, out information);
-            CloseHandle(nullOutput);
+            if (capturedOutput != IntPtr.Zero) CloseHandle(capturedOutput);
+            if (capturedError != IntPtr.Zero) CloseHandle(capturedError);
+            if (inheritedInput != IntPtr.Zero) CloseHandle(inheritedInput);
+            if (inheritedOutput != IntPtr.Zero) CloseHandle(inheritedOutput);
+            if (inheritedError != IntPtr.Zero) CloseHandle(inheritedError);
             if (!created) {
                 CloseHandle(job);
                 throw new InvalidOperationException("child creation failed");
@@ -271,12 +323,24 @@ function Invoke-QwenProtocolChild {
         [Parameter(Mandatory = $true)][string]$QwenCommand,
         [Parameter(Mandatory = $true)][string[]]$QwenArguments,
         [Parameter(Mandatory = $true)][string]$EventFilePath,
+        [Parameter(Mandatory = $true)][string]$StdoutFilePath,
+        [Parameter(Mandatory = $true)][string]$StderrFilePath,
         [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{32}$')][string]$LaunchId,
-        [Parameter(Mandatory = $true)][ValidateRange(1, 20)][int]$MaxToolCalls,
-        [Parameter(Mandatory = $true)][ValidateRange(1, 86400)][int]$MaxWallTimeSeconds
+        [Parameter(Mandatory = $true)][ValidateRange(1, 40)][int]$MaxToolCalls,
+        [Parameter(Mandatory = $true)][ValidateRange(1, 86400)][int]$MaxWallTimeSeconds,
+        [switch]$ShowOutput
     )
 
     $clock = [Diagnostics.Stopwatch]::StartNew()
+    $launchDiagnostic = [ordered]@{
+        schema_version = 1
+        supervisor_stage = 'COMMAND_RESOLUTION'
+        process_state = 'NOT_STARTED'
+        process_exit_code = $null
+        event_file_state = 'NOT_OBSERVED'
+        event_file_bytes = $null
+        console_output_mode = if ($ShowOutput) { 'VISIBLE' } else { 'SUPPRESSED' }
+    }
     $observation = [ordered]@{
         launch_id = $LaunchId
         child_started = $false
@@ -306,7 +370,9 @@ function Invoke-QwenProtocolChild {
     $qwenExitCode = 127
     $treeComplete = $false
     $writerComplete = $false
+    $eventFileFullPath = $null
     try {
+        $eventFileFullPath = [IO.Path]::GetFullPath($EventFilePath)
         $extension = [IO.Path]::GetExtension($QwenCommand).ToLowerInvariant()
         $powerShellPath = (Get-Process -Id $PID -ErrorAction Stop).Path
         if ($extension -eq '.ps1') {
@@ -333,9 +399,14 @@ function Invoke-QwenProtocolChild {
         }
         $commandLine = $commandParts -join ' '
         if ($commandLine.Length -ge 32000) { throw 'unsupported launch size' }
-        $child = [ProofLoop.QwenNativeProcess]::Start($commandExecutable, $commandLine, (Get-Location).Path)
+        $launchDiagnostic.supervisor_stage = 'PROCESS_CREATION'
+        $child = [ProofLoop.QwenNativeProcess]::Start(
+            $commandExecutable, $commandLine, (Get-Location).Path, [bool]$ShowOutput,
+            $StdoutFilePath, $StderrFilePath
+        )
         $observation.child_started = $true
-        $eventFileFullPath = [IO.Path]::GetFullPath($EventFilePath)
+        $launchDiagnostic.supervisor_stage = 'CHILD_STARTED'
+        $launchDiagnostic.process_state = 'RUNNING'
         $maximumBytes = 16 * 1024 * 1024
 
         while ($true) {
@@ -424,25 +495,66 @@ function Invoke-QwenProtocolChild {
             $observation.process_exited = [bool]$treeComplete
             $observation.event_file_closed = [bool]$writerComplete
             $qwenExitCode = $observation.process_exit_code
+            if ($observation.process_exited) {
+                $launchDiagnostic.supervisor_stage = 'PROCESS_EXITED'
+                $launchDiagnostic.process_state = 'EXITED'
+                $launchDiagnostic.process_exit_code = [int]$observation.process_exit_code
+            }
+            else {
+                $launchDiagnostic.supervisor_stage = 'PROCESS_EXIT_UNCONFIRMED'
+                $launchDiagnostic.process_state = 'UNKNOWN'
+            }
         }
     }
     catch {
+        $launchDiagnostic.supervisor_stage = switch ([string]$launchDiagnostic.supervisor_stage) {
+            'COMMAND_RESOLUTION' { 'COMMAND_RESOLUTION_FAILED' }
+            'PROCESS_CREATION' { 'PROCESS_CREATION_FAILED' }
+            default { 'CHILD_MONITOR_FAILED' }
+        }
         if ($null -ne $child) {
             [ProofLoop.QwenNativeProcess]::KillTree($child)
             [void][ProofLoop.QwenNativeProcess]::WaitRoot($child, 5000)
             $observation.process_exit_code = [ProofLoop.QwenNativeProcess]::ExitCode($child)
             $observation.process_exited = ([ProofLoop.QwenNativeProcess]::ActiveProcesses($child) -eq 0)
             $observation.event_file_closed = $observation.process_exited
+            if ($observation.process_exited) {
+                $launchDiagnostic.process_state = 'EXITED'
+                $launchDiagnostic.process_exit_code = [int]$observation.process_exit_code
+            }
+            else {
+                $launchDiagnostic.process_state = 'UNKNOWN'
+            }
         }
     }
     finally {
         if ($null -ne $child) { [ProofLoop.QwenNativeProcess]::Close($child) }
         $clock.Stop()
         $observation.elapsed_ms = [int][Math]::Min([int]::MaxValue, $clock.ElapsedMilliseconds)
+        try {
+            if ($null -eq $eventFileFullPath) {
+                $launchDiagnostic.event_file_state = 'NOT_OBSERVED'
+            }
+            elseif (Test-Path -LiteralPath $eventFileFullPath -PathType Leaf) {
+                $eventBytes = [long](Get-Item -LiteralPath $eventFileFullPath -ErrorAction Stop).Length
+                $launchDiagnostic.event_file_state = if ($eventBytes -eq 0) { 'EMPTY' } else { 'PRESENT' }
+                $launchDiagnostic.event_file_bytes = [long][Math]::Min($eventBytes, 2147483647)
+            }
+            else {
+                $launchDiagnostic.event_file_state = 'MISSING'
+            }
+        }
+        catch {
+            $launchDiagnostic.event_file_state = 'UNAVAILABLE'
+            $launchDiagnostic.event_file_bytes = $null
+        }
+        if ($launchDiagnostic.process_state -eq 'RUNNING') { $launchDiagnostic.process_state = 'UNKNOWN' }
+        if ($launchDiagnostic.supervisor_stage -eq 'CHILD_STARTED') { $launchDiagnostic.supervisor_stage = 'PROCESS_EXIT_UNCONFIRMED' }
     }
     [pscustomobject]@{
         qwen_exit_code = $qwenExitCode
         process_observation = [pscustomobject]$observation
+        launch_diagnostic = [pscustomobject]$launchDiagnostic
     }
 }
 
@@ -615,14 +727,29 @@ function Update-QwenEventProjection {
     param([object]$Event, [hashtable]$State, [long]$LineStart)
     $type = [string]$Event.type
     if ($State.session_end_offset -ne $null) { $State.valid = $false; $State.reason = 'EVENT_AFTER_SESSION_END'; return }
-    if ($type -eq 'system' -and $Event.subtype -eq 'session_start') {
+    if ($type -eq 'system' -and $Event.subtype -in @('session_start', 'init')) {
         if ($State.session_started -or [string]::IsNullOrWhiteSpace([string]$Event.session_id)) { $State.valid = $false; $State.reason = 'SESSION_START_INVALID' }
         $State.session_started = $true
+        $State.session_id = [string]$Event.session_id
         return
     }
     if (-not $State.session_started) { $State.valid = $false; $State.reason = 'EVENT_BEFORE_SESSION_START'; return }
     if ($type -eq 'system' -and $Event.subtype -eq 'session_end') {
         $State.session_end_offset = $LineStart
+        return
+    }
+    if ($type -eq 'result') {
+        $errorProperty = $Event.PSObject.Properties['is_error']
+        if ([string]$Event.session_id -cne [string]$State.session_id -or
+            [string]::IsNullOrWhiteSpace([string]$Event.subtype) -or
+            ($null -ne $errorProperty -and $errorProperty.Value -isnot [bool]) -or
+            $State.pending.Count -ne 0) {
+            $State.valid = $false
+            $State.reason = 'TERMINAL_RESULT_INVALID'
+        }
+        else {
+            $State.session_end_offset = $LineStart
+        }
         return
     }
     if ($type -eq 'assistant') {
@@ -635,6 +762,9 @@ function Update-QwenEventProjection {
                     $State.reason = 'TOOL_USE_INVALID'
                 }
                 else { $State.pending[$id] = $true }
+            }
+            elseif ($block.type -eq 'thinking') {
+                if ($block.thinking -isnot [string]) { $State.valid = $false; $State.reason = 'ASSISTANT_BLOCK_INVALID' }
             }
             elseif ($block.type -ne 'text') { $State.valid = $false; $State.reason = 'ASSISTANT_BLOCK_UNKNOWN' }
         }

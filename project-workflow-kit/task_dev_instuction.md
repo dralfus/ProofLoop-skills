@@ -56,9 +56,10 @@ flag и reason. Для Codex compatible inventory обязан иметь proven
 `provider: openai` и `source: codex-runtime`; Luna, Terra и Sol — только
 примеры registry.
 
-Для Qwen Code v0.22.2 Controller принимает только exact runtime declaration и
-одну совпадающую configured/active model identity и lock этой identity для
-всех ролей. До dispatch он требует
+Для Qwen Controller принимает runtime `provider/product` и записывает
+наблюдаемую версию только как evidence, без version allow-list. Допуск требует
+фактически подтверждённые capabilities, одну совпадающую configured/active
+model identity и lock этой identity для всех ролей. До dispatch он требует
 fresh named subagent, continuation Implementer, fresh read-only Reviewer без
 fork/write и executable verification command. Любое отсутствие —
 `BLOCKED_CAPABILITY`; observed usage возвращается как `AVAILABLE` либо
@@ -73,11 +74,12 @@ Boolean capability обязана быть literal `true`; verification command 
 непустой string либо object `{"argv": ["<non-empty argument>", "..."]}`.
 Truthy surrogate и пустой command блокируются.
 
-Qwen пользователь устанавливает extension из корня workflow clone через
-`qwen extensions install .`, проверяет `/skills` и `/agents manage`, затем
-выполняет `/finish-ticket ticket <ID или путь>`. Extension публикует тот же
-canonical skill/lifecycle и named `finish-ticket-controller`; не копируйте
-lifecycle в проект ticket. Реальный pilot запускается только по процедуре из
+Для protocol пользователь запускает установленный личный Skill командой
+`/finish-ticket ticket <ID или путь>`. Launcher проверяет его файл
+`~/.qwen/skills/finish-ticket/SKILL.md` и frontmatter name, не меняя файл.
+Extension skills имеют отдельный namespaced route; extension может публиковать
+named `finish-ticket-controller`, но не является prerequisite личного Skill.
+Не копируйте lifecycle в проект ticket. Реальный pilot запускается только по процедуре из
 `docs/experiments/qwen-code-v0222-pilot.md`; пока CLI отсутствует, evidence
 должно оставаться `NOT_RUN`.
 

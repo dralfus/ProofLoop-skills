@@ -33,7 +33,7 @@ def make_receipt(
             "max_subagent_depth": 1,
         },
         "loop_detection": True,
-        "extension_available": True,
+        "finish_ticket_skill_available": True,
     }
 
 

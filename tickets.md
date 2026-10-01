@@ -373,12 +373,24 @@ A later separate bounded protocol launch reached Qwen and returned
 ending was false, loop state was `UNOBSERVED`, and `budget_stop=false`. Its
 raw-free output omitted Qwen's exit code and terminal-envelope classification,
 so the actual Qwen failure cause remains unknown. The live protocol pilot is
-therefore FAILED / E2E success NOT PROVEN, not `NOT_RUN`; no further launch is
-authorized by this record. Local D050 regression now verifies that future
+therefore FAILED / E2E success NOT PROVEN, not `NOT_RUN`. This historical record
+did not authorize another launch; the later, separate D066 owner approval
+allows exactly one disposable Ticket 314 test-only follow-up under the scoped
+`pilot-expanded` profile. Local D050 regression now verifies that future
 failure projections preserve allowlisted envelope classification, counters
 when available, and exit codes without raw output. The post-attempt credential
 regression also verifies the key is removed before Python projection and the
 prior process value is restored.
+
+**D066 follow-up result, 2026-09-27:** one owner-authorized disposable Ticket
+314 test-only launch passed capability and guard receipts (`20 turns / 40 tool
+calls / 30m / depth 1`) but stopped before Qwen child start at
+`cli_stage=CREDENTIAL_LOOKUP`. `supervisor_stage=NOT_REACHED`,
+`process_state=NOT_STARTED`, duration `1,867 ms`, counters `NOT_AVAILABLE`; no
+Qwen model request or role dispatch occurred and the baseline/index remained
+unchanged. No retry was made. E2E success remains NOT PROVEN. The next step is a
+separate model-free, raw-free diagnosis of the Windows Credential Manager read
+in the child PowerShell host; another live pilot requires separate owner approval.
 
 - [x] `recon` сохраняет малый budget `3 turns / 6 tools / 5m` и наследует
   настроенный Qwen thinking/reasoning; ему не нужен CLI-переключатель
@@ -593,6 +605,12 @@ bounded disposable protocol launch was attempted on 2026-09-25 and failed closed
 before eligible terminal evidence; the multi-repair continuation remains
 NOT_RUN pending a separately authorized native-compatibility gate.
 
+После D052 отдельный visible-output diagnostic attempt на изменённом
+test-only scope также завершился `QWEN_COMMAND_FAILED` за `1441 ms`, но до
+supervisor dispatch (`NOT_REACHED`); Qwen child/model request не стартовали,
+target checkout чистый, retry не выполнялся. Это не Ticket 24 continuation
+evidence и не меняет `BLOCKED_EVIDENCE_SOURCE`.
+
 - [x] CLI capability/preflight gate passes without changing user Qwen
   settings/provider/sampling/role profile; raw-free receipt:
   `.scratch/qwen-ticket24-capability-smoke-20260924.json`.
@@ -607,3 +625,130 @@ NOT_RUN pending a separately authorized native-compatibility gate.
   and dispatches exactly one fresh session.
 - [ ] Сохранены counters/ledger и raw-free terminal evidence; no transfer,
   acceptance or commit without separate gates.
+
+D053 corrected the local protocol launcher from headless `--prompt` to
+`--prompt-interactive` and synchronized capability, guard-policy and bridge
+checks. This removes a local design mismatch but does not prove native TUI,
+approval UI, or `--json-file` behavior against a live Qwen child; the gate above
+remains separately authorized and `NOT_RUN`.
+
+## 25. Поддержать наблюдавшуюся Qwen event-схему в terminal projection
+
+**Что реализовать:** устранить raw-free block `EVENT_SCHEMA_UNKNOWN` для
+наблюдавшегося native Qwen JSONL dialect, не ослабляя fail-closed обработку
+неизвестных форм. Источник для исследования — launch
+`46d14fc6e82c47118a3f1d1a96b549de`: process exit `0`, event file `7,236`
+bytes, восемь наблюдённых строк, три assistant turns, два tool dispatch/result,
+terminal result присутствовал, `agent_dispatches=0`; terminal projection
+завершилась `EVENT_SCHEMA_UNKNOWN`, а event coverage осталась `UNKNOWN`.
+
+**Входные данные и границы:** сначала проверить read-only, доступен ли в
+owner-controlled окружении trace именно этого запуска. Если доступен, извлечь
+только безопасный структурный fixture: allowlisted event/block discriminators
+и имена schema-полей; заменить prompt/text/input/result и все session/tool IDs
+на placeholders. Raw stream, debug log, абсолютные пути, секреты и значения
+инструментальных payloads в Git, отчёты или receipts не копировать. Если trace
+недоступен, не угадывать новую схему и не повторять native protocol launch ради
+получения trace: остановить эту часть с `BLOCKED_EVIDENCE_SOURCE` и запросить
+отдельное решение о следующем диагностическом шаге.
+
+**Scope:** `scripts/qwen_terminal_evidence.py` и focused fixtures/tests в
+`tests/test_qwen_terminal_evidence.py`; обновить каноническое описание и
+синхронные operator/plugin документы только в объёме принятого контракта.
+Версионный allow-list Qwen не добавлять.
+
+**Status:** `BLOCKED_EVIDENCE_SOURCE` (2026-09-28). Read-only проверка
+owner-controlled окружения не нашла trace запуска
+`46d14fc6e82c47118a3f1d1a96b549de`: поиск по `.scratch`, `.tmp`, `.worktrees`,
+`%TEMP%`, `AppData\Local\Temp`, `~\.qwen\tmp` и содержимому репозитория вернул
+только упоминание launch id в этом тикете. По условию тикета схема не угадывалась,
+native protocol launch ради trace не повторялся; следующий диагностический шаг
+требует отдельного решения владельца. Implementation, live protocol rerun,
+acceptance и commit NOT_RUN.
+
+- [ ] Sanitized fixture воспроизводит фактическую форму событий; его происхождение
+  и редактирование проверяемы без сохранения raw payload.
+- [ ] Fixture последнего запуска по-прежнему проецируется как неполный/blocked
+  role lifecycle с нулём agent dispatches; adapter не превращает отсутствие
+  роли в успех.
+- [ ] Отдельный complete fixture доказывает только те terminal и role outcomes,
+  которые действительно присутствуют в его событиях; неизвестный dialect,
+  malformed event и неизвестный block остаются fail-closed.
+- [ ] Focused regression локально воспроизводит прежний
+  `EVENT_SCHEMA_UNKNOWN` и проходит после минимального adapter fix; raw text,
+  prompts, tool payloads и IDs не появляются в receipts/tests output.
+- [ ] Qwen settings, provider/auth, reasoning, sampling, role profile,
+  `.qwen`/Stepler файлы и Ticket 314 не изменяются; отдельный live protocol
+  pilot не входит в задачу.
+
+## 26. Progress checkpoint для Qwen role-agents по данным Ticket 314
+
+**Что реализовать:** добавить наблюдаемый Controller progress checkpoint для
+длинных role-agent запусков, не уменьшая абсолютный budget и не подменяя
+loop detector. Реализацию начинать после Ticket 25, который должен установить
+достаточную event/tool seam для проверки границы role-agent.
+
+**Исходная выборка, предоставленная владельцем:** 22 запуска (21 обычный
+subagent, один fork): 11 `LOOP_DETECTED`, 6 silent failed, 1 user-cancelled,
+4 completed. Среди 17 loop/silent failures у 16 было не менее 10 read calls;
+все четыре `completed` имели не более шести, но один был fork с нулём tool
+calls. Поэтому продуктивно завершились три обычных запуска, а не четыре.
+Silent failures (6/6) коррелировали с foreground/working_dir и 10–13 reads;
+это отдельный outcome, не доказанная причинность и не разновидность петли.
+Один `LOOP_DETECTED` включал 9 reads, 5 writes и 2 shell calls: read-count
+checkpoint не заменяет mixed-tool loop detection.
+
+**Принятое правило:** если незавершённый role-agent достиг шести cumulative
+read-only tool calls, Controller требует короткий progress checkpoint до
+следующего действия: новые проверенные факты/evidence и один конкретный
+следующий шаг. Шесть — checkpoint threshold, не hard cap, не число
+последовательных вызовов и не повод автоматически завершить полезную работу.
+Продолжение допускается только после оценки Controller и конкретного прогресса;
+исходный task/scope неизменен, накопленные counters не сбрасываются.
+
+**Не менять:** обычные native protocol limits `20 turns / 20 tool calls / 30m /
+depth 1`; scope-gated Ticket 314 `pilot-expanded` profile; Qwen
+`model.maxToolCallsPerTurn`, `model.maxSubagentDepth`, thinking/reasoning,
+provider/auth, sampling, role profile, настройки или внешние `.qwen`/Stepler
+файлы. Существующий exact repeated-fingerprint detector остаётся немедленным
+terminal stop. Silent failure классифицировать отдельно, без автоматического
+retry; не запрещать foreground/working_dir только по корреляции этой маленькой
+выборки. Fork с нулём действий не считать успешным выполнением роли.
+
+**Критерий улучшения:** fixtures доказывают, что при 0–5 reads checkpoint не
+навязывается; шестой read у незавершённой роли требует progress checkpoint;
+валидный checkpoint позволяет продолжить в том же task/scope без сброса
+counters, а отсутствие проверяемого прогресса блокирует следующее действие.
+Exact repeated tool cycle по-прежнему останавливается немедленно, mixed-tool
+cycle не получает исключения, silent failure не переименовывается в loop и не
+повторяется автоматически. Измерение шести — точка проверки, а не вывод о
+причинном пороге: выборка Ticket 314 мала, содержит fork/no-op и отмену.
+
+**Status:** implemented locally 2026-09-28 (D070) по отдельному решению
+владельца выполнять seam и checkpoint независимо от `BLOCKED_EVIDENCE_SOURCE`
+Ticket 25: checkpoint считается только по наблюдаемым вызовам, неизвестные
+формы остаются fail-closed. SEAM_FEASIBILITY доказан частично: parent stream
+связывает role identity, completion и dispatch-level tool class/count;
+вложенные tool calls роли в parent потоке не наблюдаются — counters
+атрибутируются только наблюдаемым вызовам, остальное уходит в conservative
+unattributed tally без checkpoint authority (см. D070). Live validation,
+settings change, acceptance и commit не выполнялись и не авторизованы.
+
+- [x] `SEAM_FEASIBILITY` подтвержден в наблюдаемом объёме: production event
+  path (`qwen_terminal_evidence` stream-json) связывает allowlisted role
+  identity, dispatch completion и tool class/count; checkpoint decision —
+  executable pure policy, не prompt-only обещание. Ограничение вложенной
+  наблюдаемости зафиксировано в D070 как отдельный будущий design gap.
+- [x] RED/GREEN tests покрывают read thresholds 5/6, завершённую до threshold
+  роль, continuation без counter reset, отсутствие прогресса, scope drift,
+  mixed read/write/shell patterns без исключений, fork/resume/no-op как
+  непродуктивные и malformed stream fail-closed
+  (`tests/test_qwen_role_progress_checkpoint.py`, 20 tests PASS).
+- [x] Tests и docs сохраняют различие между correlation и causation и не
+  пересчитывают Ticket 314 выборку как общее качество Qwen.
+- [x] Canonical protocol, Qwen Controller instructions, plugin/личный SKILL.md,
+  runtime contract (`--project-role-progress`) и decision record D070
+  согласованы; полный suite запускается только после независимого static review.
+- [ ] Отдельный bounded live validation, если он понадобится, требует нового
+  budget/mode объявления и отдельного разрешения владельца; эта задача сама
+  его не запускает.

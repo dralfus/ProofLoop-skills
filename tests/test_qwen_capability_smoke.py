@@ -27,7 +27,7 @@ class QwenCapabilitySmokeTest(unittest.TestCase):
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
                 "Add-Content -LiteralPath $env:QWEN_SMOKE_CALLS -Value ($Arguments -join ' ')\n"
                 "if ($Arguments.Count -eq 1 -and $Arguments[0] -eq '--version') { Write-Output '0.24.0'; exit 0 }\n"
-                "if ($Arguments.Count -eq 1 -and $Arguments[0] -eq '--help') { Write-Output '--prompt --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth'; exit 0 }\n"
+                "if ($Arguments.Count -eq 1 -and $Arguments[0] -eq '--help') { Write-Output '--prompt --output-format stream-json --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth'; exit 0 }\n"
                 "exit 9\n",
                 encoding="utf-8",
             )
@@ -55,6 +55,7 @@ class QwenCapabilitySmokeTest(unittest.TestCase):
             projection = json.loads(result.stdout)
             self.assertEqual(projection["status"], "QWEN_CLI_CAPABILITY_READY")
             self.assertEqual(projection["version"], "0.24.0")
+            self.assertTrue(projection["capabilities"]["stream_json_output"])
             self.assertFalse(projection["role_dispatch"])
             self.assertFalse(projection["acceptance"])
             self.assertEqual(calls_path.read_text(encoding="utf-8").splitlines(), ["--version", "--help"])
@@ -67,6 +68,39 @@ class QwenCapabilitySmokeTest(unittest.TestCase):
             self.assertNotIn("implementer", smoke_source.lower())
             self.assertIn("'--version'", smoke_source)
             self.assertIn("'--help'", smoke_source)
+
+    def test_smoke_blocks_when_stream_json_capability_is_missing(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the Qwen smoke contract")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            fake_qwen = temporary_root / "fake-qwen.ps1"
+            evidence_path = temporary_root / "smoke.json"
+            fake_qwen.write_text(
+                "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
+                "if ($Arguments.Count -eq 1 -and $Arguments[0] -eq '--version') { Write-Output '0.24.5'; exit 0 }\n"
+                "if ($Arguments.Count -eq 1 -and $Arguments[0] -eq '--help') { Write-Output '--prompt --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth'; exit 0 }\n"
+                "exit 9\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [PWSH, "-NoProfile", "-File", str(SMOKE), "-QwenCommand", str(fake_qwen), "-EvidencePath", str(evidence_path)],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                env=os.environ.copy(),
+            )
+
+            self.assertEqual(result.returncode, 3)
+            projection = json.loads(result.stdout)
+            self.assertEqual(projection["status"], "BLOCKED_CAPABILITY")
+            self.assertEqual(projection["reason"], "QWEN_CLI_CAPABILITY_MISSING")
+            self.assertTrue(projection["capabilities"]["prompt"])
+            self.assertFalse(projection["capabilities"]["stream_json_output"])
+            self.assertFalse(projection["role_dispatch"])
+            self.assertFalse(projection["acceptance"])
+            self.assertEqual(json.loads(evidence_path.read_text(encoding="utf-8")), projection)
 
 
 if __name__ == "__main__":

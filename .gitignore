@@ -3,6 +3,10 @@
 .codex/
 .worktrees/
 dist/
+/.scratch/
+/.qwen/
+/.superpowers/
+/%SystemDrive%/
 
 # Локальные, не обезличенные evidence конкретных проектов
 docs/experiments/ticket-353-checkpoint-2026-08-28.md

@@ -45,6 +45,66 @@ def init_repo(root: Path) -> str:
 
 
 class QwenRuntimeAdapterTest(unittest.TestCase):
+    def test_cli_projects_allowlisted_role_lifecycle_as_separate_raw_free_evidence(self) -> None:
+        events = [
+            {"type": "system", "subtype": "session_start", "session_id": "private-session"},
+            {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "private request"}]}},
+        ]
+        for index, role in enumerate((
+            "finish-ticket-implementer",
+            "finish-ticket-reviewer",
+            "finish-ticket-verifier",
+        )):
+            tool_id = f"private-tool-{index}"
+            events.extend([
+                {
+                    "type": "assistant",
+                    "message": {
+                        "id": f"private-assistant-{index}",
+                        "role": "assistant",
+                        "content": [{
+                            "type": "tool_use",
+                            "id": tool_id,
+                            "name": "agent" if index == 1 else "Agent",
+                            "input": {"subagent_type": role, "prompt": "private prompt"},
+                        }],
+                    },
+                },
+                {
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": tool_id, "content": "private result"}],
+                    },
+                },
+            ])
+        events.append({"type": "system", "subtype": "session_end", "data": {"reason": "clean"}})
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            event_path = Path(temp_dir) / "events.jsonl"
+            event_path.write_text(
+                "".join(json.dumps(event) + "\n" for event in events),
+                encoding="utf-8",
+            )
+            output = StringIO()
+            with redirect_stdout(output):
+                exit_code = ADAPTER.main([
+                    "--project-role-lifecycle", str(event_path),
+                    "--launch-id", "c" * 32,
+                ])
+
+        projection = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(projection["status"], "COMPLETE")
+        self.assertEqual(projection["launch_id"], "c" * 32)
+        self.assertEqual(
+            [call["role"] for call in projection["role_calls"]],
+            ["finish-ticket-implementer", "finish-ticket-reviewer", "finish-ticket-verifier"],
+        )
+        rendered = output.getvalue()
+        for forbidden in ("private-session", "private request", "private prompt", "private result"):
+            self.assertNotIn(forbidden, rendered)
+
     def test_cli_requires_host_observation_before_emitting_terminal_receipt(self) -> None:
         events = [
             {"type": "system", "subtype": "session_start", "session_id": "private-session"},
@@ -85,10 +145,10 @@ class QwenRuntimeAdapterTest(unittest.TestCase):
         self.assertEqual(projection["session_id_hash"], hashlib.sha256(b"private-session").hexdigest())
         self.assertNotIn("private-session", output.getvalue())
 
-    def test_event_projection_is_raw_free_and_counts_only_allowlisted_metadata(self) -> None:
+    def test_event_projection_accepts_init_and_thinking_as_raw_free_metadata(self) -> None:
         events = [
-            {"type": "system", "subtype": "session_start", "session_id": "private-session-id", "data": {"cwd": "C:/private"}},
-            {"type": "assistant", "message": {"id": "m1", "content": [{"type": "text", "text": "secret prompt echo"}, {"type": "tool_use", "id": "tool-1", "name": "run_shell_command", "input": {"command": "private command"}}]}},
+            {"type": "system", "subtype": "init", "session_id": "private-session-id", "data": {"cwd": "C:/private"}},
+            {"type": "assistant", "message": {"id": "m1", "content": [{"type": "thinking", "thinking": "private reasoning block"}, {"type": "text", "text": "secret prompt echo"}, {"type": "tool_use", "id": "tool-1", "name": "run_shell_command", "input": {"command": "private command"}}]}},
             {"type": "assistant", "message": {"id": "m2", "content": [{"type": "text", "text": "private result"}]}},
             {"type": "system", "subtype": "session_end", "data": {"reason": "prompt_input_exit"}},
         ]
@@ -103,8 +163,19 @@ class QwenRuntimeAdapterTest(unittest.TestCase):
         self.assertIsNone(result["terminal_reason"])
         self.assertRegex(result["session_id"], r"^[0-9a-f]{64}$")
         rendered = json.dumps(result)
-        for forbidden in ("private-session-id", "private command", "private result", "secret prompt echo", "C:/private"):
+        for forbidden in ("private-session-id", "private command", "private result", "secret prompt echo", "C:/private", "private reasoning block"):
             self.assertNotIn(forbidden, rendered)
+
+    def test_event_projection_rejects_malformed_thinking_block(self) -> None:
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "private-session-id"},
+            {"type": "assistant", "message": {"id": "m1", "content": [{"type": "thinking", "thinking": 17}]}},
+        ]
+
+        result = ADAPTER.project_qwen_events("\n".join(json.dumps(item) for item in events) + "\n", wall_time_seconds=1)
+
+        self.assertEqual(result["status"], "BLOCKED_CAPABILITY")
+        self.assertEqual(result["reason"], "QWEN_RUNTIME_EVIDENCE_UNSUPPORTED")
 
     def test_unknown_or_truncated_event_stream_fails_closed_without_raw_echo(self) -> None:
         for stream in (
@@ -200,6 +271,13 @@ class QwenRuntimeAdapterTest(unittest.TestCase):
             self.assertEqual(result["ledger"][0]["turns"], 2)
             self.assertEqual(result["ledger"][-2]["fresh_evidence_id"], "8" * 32)
 
+            oversized_request = json.loads(json.dumps(request))
+            oversized_request["continuation_context"] = "x" * (ADAPTER.MAX_CONTINUATION_PACKET_BYTES + 1)
+            oversized = ADAPTER.prepare_continuation(oversized_request)
+            self.assertEqual(oversized["status"], "BLOCKED_CAPABILITY")
+            self.assertEqual(oversized["reason"], "CONTROLLER_EVIDENCE_MALFORMED")
+            self.assertFalse(oversized["role_dispatch"])
+
             invalid_updates = (
                 {"schema_version": "proofloop.qwen-terminal-receipt.v2"},
                 {"launch_id": "b" * 32},
@@ -282,8 +360,10 @@ class QwenRuntimeAdapterTest(unittest.TestCase):
             self.assertNotIn("continuation_packet", result)
 
     @staticmethod
-    def make_progress_ledger(facts: dict[str, str]) -> dict[str, object]:
-        continuation_context = "Complete the next measurable closure in the existing scope."
+    def make_progress_ledger(
+        facts: dict[str, str],
+        continuation_context: str = "Complete the next measurable closure in the existing scope.",
+    ) -> dict[str, object]:
         event: dict[str, object] = {
             "sequence": 1,
             "kind": "LOCAL_GREEN",
@@ -349,7 +429,7 @@ class QwenRuntimeAdapterTest(unittest.TestCase):
                 "receipt_type": "QWEN_SESSION_GUARD", "receipt_version": 1, "launch_id": "a" * 32,
                 "issued_at_utc": "2026-09-24T12:00:00.000Z", "mode": "protocol",
                 "limits": {"max_session_turns": 20, "max_tool_calls": 20, "max_wall_time": "30m", "max_subagent_depth": 1},
-                "loop_detection": True, "extension_available": True,
+                "loop_detection": True, "finish_ticket_skill_available": True,
             },
             "ledger": [], "ledger_anchor": {"ledger_id": "a" * 32, "sequence": 0, "head_hash": "GENESIS"},
             "observation": observation,

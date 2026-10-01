@@ -89,12 +89,27 @@ Skill устанавливается вместе с plugin `agentic-development
 Codex marketplace. Инструкции для человека находятся в репозитории plugin, а
 не в проекте разработки.
 
-Qwen Code v0.22.2 устанавливает extension из корня того же repository:
+Для установки Qwen extension из корня того же repository используйте:
 `qwen extensions install .`. Он публикует этот же skill и Qwen Controller
 agent; canonical lifecycle остаётся только в `references/task-lifecycle.md`.
-Короткий Qwen запуск: `/finish-ticket ticket <ID или путь>`. До role dispatch
+Для Qwen protocol используйте личный `/finish-ticket ticket <ID или путь>` из
+`~/.qwen/skills/finish-ticket/`. Extension skills вызываются отдельно как
+`/<extension-name>:<skill-name>`. До role dispatch
 Controller применяет exact Qwen capability preflight, затем
-`QWEN_CONVERGENT`, а не Codex numeric repair cap.
+`QWEN_CONVERGENT`, а не Codex numeric repair cap. Незавершённая role-agent с
+шестью накопленными read-only tool calls получает progress checkpoint до
+следующего действия по canonical lifecycle; это threshold, не hard cap и не
+замена loop detector.
+Protocol launcher изолирует Credential Manager lookup в отдельном PowerShell
+host; continuation packet передаётся временным UTF-8 файлом с пределом
+`14,000 bytes` из-за Windows command-line budget, не из-за лимита модели.
+Обычный Qwen protocol остаётся `20 turns / 20 tool calls / 30m / depth 1`.
+Профиль `pilot-expanded` (40 tool calls) допустим только с отдельным
+owner-authorized disposable Ticket 314 test-only packet/receipt; не выбирайте
+его для обычных задач и не меняйте `model.maxToolCallsPerTurn`. Partial event
+counters и `runtime_projection_reason` из `QWEN_TERMINAL_OUTCOME` v5 — только
+диагностика, не доказательство terminal/role success или разрешение на
+continuation.
 
 ## QWEN_PATCH_SEAL
 

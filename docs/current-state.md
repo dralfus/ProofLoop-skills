@@ -176,7 +176,8 @@ evidence; он не запускает role-agent или acceptance. Ticket 18 �
 решению D046 `recon` сохраняет configured thinking, ограничиваясь малым
 runtime budget; implementation follow-up удалил obsolete `--no-thinking` gate
 из mode/argv/launcher contract и усилил инструкции Qwen по обязательному
-следованию установленному `/finish-ticket` skill. Capability smoke прошёл на
+следованию установленному `finish-ticket` skill (route contract позже уточнён
+D055). Capability smoke прошёл на
 Qwen 0.24.4; bounded pilot `3/6/5m/depth1` завершился `QWEN_RECON_READY` на
 clean baseline `335ba1dc0364e7bb9ac0413925e1a1e8440cb760`, с валидным
 structured output, `writes=false` и всеми dispatch/acceptance flags `false`.
@@ -194,7 +195,8 @@ Ticket 18. Для controlled fixture owner-authorized declaration фиксиру
 ## Наблюдаемый failure mode 14: recon не имел отдельной executable boundary
 
 Design-only разбор Ticket 20 установил, что guarded launcher принимал только
-`protocol`: его `ValidateSet`, child CLI contract и fixed `/finish-ticket`
+`protocol`: его `ValidateSet`, child CLI contract и fixed
+`/finish-ticket`
 prompt не позволяли безопасно выразить read-only recon. Простое снятие
 ограничения расширило бы authority без доказуемых write/subagent/structured
 output gates. Ticket 20 добавляет отдельный native `recon` contract с clean
@@ -223,14 +225,16 @@ checkpoint/progress identities блокируют replay. Session ceilings
 внешние файлы не меняются.
 
 Прежняя native-only projection не могла доказать host budget stop или loop-clear.
-После принятия D051 protocol launcher использует host-owned terminal receipt:
-supervisor владеет child process tree, обрабатывает только полные записи
-`--json-file` sidecar и удаляет transcript после raw-free projection.
-Continuation требует `HOST_WALL_LIMIT` или `HOST_TOOL_LIMIT`,
-`event_coverage=COMPLETE`, post-stop `session_end`, закрытый process tree,
-checkpoint и `HOST_CLEAR` от `exact_tool_interaction_cycle_v1`. Локальные fake
-fixtures не являются live Qwen proof; Ticket 24 остаётся `BLOCKED_EVIDENCE_SOURCE` /
-`NOT_RUN` до отдельной проверки native process/event совместимости.
+После D051 protocol использовал host-owned terminal receipt и `--json-file`;
+этот transport был заменён D059 после выявленного TTY mismatch. Текущий
+protocol получает полные JSONL events из stdout `--output-format stream-json`
+при запуске личного `/finish-ticket` через headless `--prompt`. Валидный финальный
+`type=result` либо поддерживаемый `session_end` завершает обычный запуск;
+продолжение после host stop по-прежнему требует post-stop terminal event,
+`HOST_WALL_LIMIT` или `HOST_TOOL_LIMIT`, полного `event_coverage=COMPLETE`,
+закрытого process tree, checkpoint и `HOST_CLEAR` от
+`exact_tool_interaction_cycle_v1`. Сырые events удаляются после raw-free
+projection. Fake fixtures не являются live Qwen proof.
 
 2026-09-22 диагностика live recon завершена. Первые bounded прогоны выявили
 три отдельные причины: native exit `-1073740791` после валидного terminal
@@ -417,3 +421,304 @@ Post-fix local verification: focused Qwen runtime suites `94 passed` plus
 `python -m unittest discover -s tests` — `227/227`; plugin validator with
 `plugins/agentic-development-workflow` — exit `0`; PowerShell AST parse `3/3`;
 `git diff --check` — exit `0` (only line-ending conversion warnings).
+
+D052 добавил raw-free launch-stage evidence и opt-in visible output для нового
+bounded protocol diagnostic attempt. `-ShowOutput` не меняет default
+suppression; terminal receipt v2 хранит allowlisted outer/supervisor stage,
+process state/exit code и event-file state/size, но не raw stdout/stderr.
+Synthetic tests проверяют отсутствие raw markers в receipt и точную стадию
+command-resolution failure. Capability smoke Qwen CLI `0.24.5` прошёл.
+Единственный разрешённый visible-output protocol attempt на disposable
+test-only scope завершился за `1441 ms`: `QWEN_COMMAND_FAILED`, outer stage
+`RUNTIME_EVIDENCE_PARSED`, supervisor `NOT_REACHED`, process `NOT_STARTED`,
+event file `NOT_OBSERVED`, counters `NOT_AVAILABLE`,
+`session_ended=false`/`budget_stop=false`/`loop_status=UNOBSERVED`. Qwen child и
+model request не стартовали; причина до dispatch точно не установлена, retry не
+выполнялся. Disposable checkout остался чистым, test-only patch не создан.
+Raw-free receipt и scope записаны в
+`docs/experiments/qwen-visible-output-protocol-pilot-20260925.md` и
+`.scratch/qwen-visible-protocol-pilot-20260925/receipts/`.
+Ticket 24 остаётся `BLOCKED_EVIDENCE_SOURCE`; multi-repair continuation не
+доказана.
+
+D053 (историческое решение, заменено D059) предписывал protocol mode передавать
+skill route через `--prompt-interactive`. Последующие live-диагностические данные
+показали, что launcher запускал этот interactive режим с redirected stdin/stdout/
+stderr; поэтому дочерний процесс завершался до появления JSONL или debug evidence.
+Текущий режим и его capability markers описаны ниже по D059.
+
+Focused suites на момент D053: invocation contract `5/5`, capability smoke `2/2`, guard policy `6/6`, runtime
+guard `33/33`; full `python -m unittest discover -s tests` — `229/229`, plugin
+validator — exit `0`, `git diff --check` — exit `0`. Ни Qwen CLI, ни модель не запускались; видимость live TUI/
+approval UI не доказана. Ticket 24 сохраняет
+`BLOCKED_EVIDENCE_SOURCE` / `NOT_RUN` до отдельного разрешения.
+
+## Protocol transport correction — D059 (2026-09-27)
+
+D059 заменил interactive transport на версионно-независимый headless contract:
+`--output-format stream-json --prompt "/finish-ticket ticket N"`. Capability
+preflight теперь требует `--prompt`, `--output-format`, `stream-json` и session
+ceilings; наличие флага само по себе не считается live proof. Runtime projection
+понимает финальный `type=result` как terminal event при совпадающем session id,
+валидной схеме и отсутствии незакрытых tool calls. Supervisor использует тот же
+terminal shape для наблюдения потока. Любые stream payloads остаются временными
+и удаляются после raw-free projection.
+
+Основание: прошлый protocol child с `--prompt-interactive` запускался при
+redirected stdin/stdout/stderr, завершился с exit `1`, оставил пустой event JSONL
+и не создал debug/latest. Точная raw stderr строка не сохранялась, поэтому это
+подтверждает несовместимость interactive/TTY режима с текущим launcher, но не
+позволяет утверждать конкретное сообщение child. Официальная документация Qwen
+описывает `--prompt` как headless/non-interactive и `stream-json` как его JSONL
+event output. D059 не закрепляет версию CLI и не меняет Qwen settings, model,
+provider/auth, sampling, reasoning, role profiles или budgets.
+
+Критерий: все локальные contract/evidence/runtime tests проходят; capability
+smoke подтверждает требуемые flags без model request; затем отдельный bounded
+live pilot должен дать COMPLETE host terminal evidence и связанный COMPLETE
+Controller → Implementer → Reviewer → Verifier role projection. До такого live
+результата E2E остаётся недоказанным.
+
+### Дополнительное live evidence и исправление D060 (2026-09-27)
+
+Protocol launch через личный `/finish-ticket` с новым headless route завершился
+за `20,491 ms` с `QWEN_COMMAND_FAILED`, child exit `1`, stdout `24,052 bytes`,
+stderr отсутствовал; counters `0/0`, event coverage `INCOMPLETE`, terminal
+`UNKNOWN`, role lifecycle недоступен. Receipt указал `auth_or_forbidden`, но
+прежний classifier считал любое слово `token` или `api key` auth-сигналом; raw
+output удалён, поэтому точную причину exit=1 receipt не доказывает.
+
+Отдельная bounded headless проверка штатного `qwen.cmd` без ProofLoop key
+injection прошла: exit `0`, один assistant turn, ноль tool calls, четыре
+валидные JSONL-записи (`system`, `assistant`, `stream_event`, `result`), terminal
+`success`. Единственная system-запись имела subtype `init`, не
+`session_start`; старый projector вернул `SESSION_START_MISSING`. `Qwen
+debug/latest` при проверке отсутствовал. Это подтверждает работоспособность
+обычного headless CLI в этой проверке, но не валидность Credential Manager
+injection для отдельного protocol launch.
+
+Локальный regression принимает initial system `init` или `session_start` с
+валидным session id, сохраняя fail-closed поведение для неизвестных форм. Auth
+classifier больше не считает одиночное упоминание `token`/`API key` отказом:
+требуются явные HTTP 401/403, unauthorized/forbidden или конкретная auth-failure
+фраза. Новые тесты прошли RED → GREEN. Полный role lifecycle и test-only Ticket
+314 implementation пока не доказаны; следующий шаг — новый bounded
+`/finish-ticket` pilot после полного локального gate.
+
+D054 первоначально предписал extension namespace, но его protocol-route вывод
+отозван D055: пользовательский `/finish-ticket` — личный Skill, не extension
+alias. Registry и bridge теперь передают `/finish-ticket`, а protocol launcher
+read-only проверяет только личный `SKILL.md` и `name: finish-ticket`; extension
+manifest не требуется. Missing/invalid Skill блокируется до CLI probe,
+receipt/validators различают личный Skill и recon extension. Local focused
+checks доказывают контракт; Qwen CLI/model не запускались и runtime discovery
+не доказан.
+
+2026-09-27: D056 снял exact-version gate с Qwen role profile. CLI `0.24.6`
+подтверждён read-only `qwen.cmd --version`; версия остаётся записываемым
+evidence, а допуск решают capability и role-policy gates. Regression проверяет,
+что `0.24.6` принимается без allow-list и сохраняется в runtime trace; это
+только локальная policy-проверка. Полный live role-based lifecycle и
+реализация Ticket 314 всё ещё не доказаны: необходим отдельный bounded pilot с
+Implementer, независимым read-only Reviewer и Verifier. Внешние Qwen
+settings/auth/provider/sampling не менялись.
+
+## Protocol output-token policy correction — D061 (2026-09-27)
+
+Новый bounded `/finish-ticket` запуск завершился за `21,789 ms` с
+`QWEN_COMMAND_FAILED`, child exit `1`, `stdout=42,656 bytes`, stderr отсутствовал;
+`turns=0`, `tool_calls=0`, event coverage `UNKNOWN`, terminal и role lifecycle
+не получены. Raw-free diagnostic — `STRUCTURED_OUTPUT_MISSING`; сырой вывод
+удалён, `C:\Users\alexey.andreev\.qwen\debug\latest` отсутствует, поэтому
+точное сообщение и непосредственная причина exit `1` неизвестны.
+
+Диагностические controls прошли отдельно: тот же Node shim с коротким prompt
+вернул 4 валидных JSONL events и `result/success`; личный `/finish-ticket` в
+headless режиме без ticket также завершился `result/success` (read-only plan,
+2 tool results). Это подтверждает transport и slash-skill discovery, но не
+успешность полного Controller/role flow.
+
+Launcher задавал protocol process-scoped `QWEN_CODE_MAX_OUTPUT_TOKENS=8000`.
+Официальная документация Qwen указывает, что этот env фиксирует предел на
+ответ и переопределяет model-native limit/автоматическую эскалацию при усечении.
+Причинная связь именно с этим live failure не доказана, но ограничение не было
+обосновано соблюдением workflow и противоречило принятой политике не экономить
+токены Qwen. D061 снимает cap без изменения пользовательской конфигурации;
+turn/tool/time/depth ceilings остаются `20/20/30m/1`.
+
+Полный role lifecycle и test-only Ticket 314 всё ещё **не доказаны**. Следующий
+bounded pilot должен показать COMPLETE host terminal evidence, свежие роли
+Implementer → Reviewer → Verifier и успешный focused test. Версия Qwen остаётся
+только наблюдаемой метаданной, не allow-list.
+
+2026-09-27: D062 устранил локально воспроизводимый schema gap в terminal
+projectors: валидный assistant `thinking` block ранее отвергался как неизвестный.
+Три host consumers теперь проверяют его строковую форму и отбрасывают payload
+до любых raw-free receipt/role/fingerprint projections. 55 профильных тестов
+прошли. Live pilot `dddbe83f200643b7a762e793067689d8` завершился
+`BLOCKED_CAPABILITY / QWEN_RUNTIME_EVIDENCE_UNSUPPORTED`, exit 0,
+`0 turns / 0 tool calls`; поскольку сырой 7,185-byte stream удалён, наличие
+thinking block в нём не доказано — это правдоподобный trigger подтверждённого
+parser gap, не установленное содержимое запуска. Полный E2E и Ticket 314
+остаются недоказанными до нового полного role lifecycle и focused test.
+Поддержка не привязана к версии Qwen и не меняет model/reasoning/settings.
+
+2026-09-27: новый launch `8b9b8c9cd1b9445d83476cf882369e3a` завершился за
+`1,195 ms`: `QWEN_COMMAND_FAILED`, counters unavailable,
+`NOT_REACHED / NOT_STARTED`, event stream не наблюдался. В model-free проверках
+credential присутствует (значение не выводилось), argv contract совпал `12/12`,
+Node shim resolvable, supervisor загрузился, а его `--version` child завершился
+exit `0`; непосредственная причина полного CLI bridge отказа остаётся
+неустановленной. D063 повышает terminal outcome до v3 и добавляет allowlisted
+`launch_diagnostic.cli_stage`, не сохраняя exception text/секреты. Regression
+проверяет credential lookup failure без model request. Новый live запуск нужен,
+чтобы получить точную фазу или успешный E2E; полный lifecycle и Ticket 314 пока
+не доказаны. CLI version не закрепляется.
+
+2026-09-27 follow-up: model-free top-level bridge regression с существующим
+Credential Manager target и fake Node shim прошёл: status `QWEN_SESSION_GUARD_READY`,
+fake child подтвердил только наличие process-scoped key, environment восстановлен,
+raw key не попал в output. Изолированные same-runspace/direct-host probes оба
+дошли до ожидаемого fake command-resolution failure, поэтому прежний
+`CREDENTIAL_LOOKUP` root cause остаётся неустановленным; D064 сохраняет
+process-boundary mitigation без заявления о доказанной первопричине.
+
+При проверке новой boundary найден отдельный Windows argv defect: packet до
+`32,768` символов не помещался в host command line, а supervisor затем отсекал
+слишком длинную Qwen command line. D065 перевёл передачу packet в UTF-8 temp file
+и установил platform-derived предел `14,000 UTF-8 bytes`; focused regressions
+проверили верхнюю разрешённую границу, raw-free block сверх лимита и cleanup.
+Это не меняет Qwen session budgets/settings и не pin-ит CLI version. Live Qwen
+role lifecycle ещё не запускался.
+
+## D066 — diagnostics and one expanded disposable pilot (2026-09-27)
+
+Последний host receipt до следующего запуска — `f923fa88f3c84434a8d517643467cf33`:
+`QWEN_COMMAND_FAILED`, Qwen exit `1`, event file был, но host v3 не получил
+typed turns/tools, terminal или role evidence. Отдельные Qwen usage metadata
+показали вызов `/finish-ticket`, 20 tool calls (19 succeeded, 1 failed), без
+Agent dispatch. Metadata не объясняют, почему завершился процесс, и не заменяют
+host evidence; точная причина остаётся неизвестной.
+
+D066 добавил raw-free counters только по полностью распознанному JSONL prefix;
+malformed/truncated record не включается, а terminal projection остаётся
+fail-closed. `QWEN_TERMINAL_OUTCOME` v4 сохраняет эти partial counters только как
+диагностику. Standard protocol не изменён: `20 turns / 20 tool calls / 30m /
+depth 1`. Для одной owner-authorized disposable Ticket 314 попытки разрешён
+отдельный `pilot-expanded` guard receipt/profile с 40 tool calls; его scope
+проверяется в обоих launcher layers, а `model.maxToolCallsPerTurn` и остальные
+пользовательские Qwen settings не меняются. Полный local suite прошёл `265`
+тестов (`1` skipped); capability smoke дал `QWEN_CLI_CAPABILITY_READY`, все
+`7/7` required markers обнаружены.
+
+Единственная разрешённая D066 live попытка `bdcc0068e37a4eebbe8090a38919a629`
+остановилась за `1,867 ms` на `QWEN_COMMAND_FAILED`,
+`cli_stage=CREDENTIAL_LOOKUP`, `supervisor_stage=NOT_REACHED`,
+`process_state=NOT_STARTED`; event file не наблюдался. Guard receipt v2 был
+готов с профилем `pilot-expanded`, `20 turns / 40 tool calls / 30m / depth 1`,
+loop detection enabled и `finish_ticket_skill_available=true`. Qwen child/model
+request не запускались: counters `NOT_AVAILABLE`, role dispatch не было,
+terminal receipt v4 не содержит partial observation. Disposable baseline test
+hash и staged-index hash не изменились, unstaged diff пуст. Raw-free terminal и
+guard receipts находятся в
+`.scratch/qwen-role-lifecycle-pilot-20260927-diag40-receipts/`.
+
+Это локализует отказ до чтения Generic Credential из Windows Credential
+Manager в отдельном CLI consumer, но не доказывает, отсутствовал ли target,
+был ли недоступен для этого процесса или возник иной lookup error: exception
+details намеренно не сохраняются. Retry в рамках D066 запрещён. E2E остаётся
+недоказанным до отдельного raw-free credential lookup diagnosis и нового
+разрешения на live попытку.
+
+## D067 — raw-free runtime projection reason (2026-09-27)
+
+В parent receipt обнаружен отдельный contract gap: host projector уже возвращал
+типизированную причину event/lifecycle block, но top-level launcher сохранял
+только общий `QWEN_RUNTIME_EVIDENCE_UNSUPPORTED`. Добавлено поле
+`runtime_projection_reason` с фиксированным allowlist в
+`QWEN_TERMINAL_OUTCOME` v5. Fake-process regression подтвердил передачу
+`TOOL_RESULT_MISSING` и счётчиков `1 dispatch / 0 results` через CLI consumer в
+parent output/receipt; приватные JSONL-маркеры туда не попадают.
+
+В последнем bounded live запуске из текущего рабочего сеанса Qwen child завершился
+с exit `0`; raw-free partial observation показал `8` событий, `3` assistant
+turns, `2` tool dispatch/results, `0` tool errors, `0` Agent dispatches и
+наличие terminal result. Launcher вернул `BLOCKED_CAPABILITY /
+QWEN_RUNTIME_EVIDENCE_UNSUPPORTED`, потому что точная raw-free projection reason
+не дошла до parent receipt. Это подтверждает, что Qwen запускался и выполнял
+некоторые действия, но не доказывает ни одного role-agent dispatch или Ticket
+314 patch. D067 улучшает наблюдаемость будущих запусков, но не восстанавливает
+уже удалённый live stream и не определяет задним числом причину того запуска.
+
+После D067 выполнен один bounded protocol pilot; его credential-context
+диагностика записана в D068 ниже. Raw capture оставался выключенным. Локальная
+проверка D067 завершена: focused runtime-guard suite — `46` tests,
+`1` skipped; полный suite — `266` tests, `1` skipped; обе plugin validation
+команды прошли. E2E Ticket 314 всё ещё не доказан.
+
+## D068 — Credential Manager target отсутствует в identity текущего agent host (2026-09-27)
+
+После D067 capability smoke обнаружил Qwen CLI `0.24.6` и `7/7` требуемых
+маркеров. Единственный disposable protocol pilot
+`c14a89d7b86e4cf9ae39b3678cb3f209` завершился до старта Qwen child:
+`QWEN_COMMAND_FAILED`, `cli_stage=CREDENTIAL_LOOKUP`,
+`supervisor_stage=NOT_REACHED`, `process_state=NOT_STARTED`,
+`event_file_state=NOT_OBSERVED`; turn/tool counters недоступны. Retry не
+выполнялся, model request и role dispatch не происходили.
+
+Model-free вызов того же `qwen_credential.ps1` из отдельного `pwsh 7.5.5 x64`
+вернул raw-free `Win32Exception` code `1168` (`ERROR_NOT_FOUND`). Проверка
+Windows identity показала, что текущий процесс не запущен как
+`alexey.andreev`, хотя `USERPROFILE` указывает на
+`C:\Users\alexey.andreev`. Raw-free inventory через `cmdkey /list` не нашёл
+ожидаемый target `ProofLoop/Qwen/OpenAI`; исходный список и секреты не
+выводились.
+
+Это локализует текущий блокер: Credential Manager lookup выполняется от
+security principal процесса agent host, которому target недоступен. Это не
+проверка валидности API key и не HTTP/403 отказ; запрос к Qwen не отправлялся.
+Не копировать ключ в environment и не переносить credential между Windows
+identity. Владелец выполнил тот же model-free helper probe из своего PowerShell;
+результат `CREDENTIAL_PRESENT`. Отдельная команда `finally` была введена уже
+после завершения блока `try/catch` и дала ожидаемую syntax error; credential
+probe при этом уже завершился. Для следующей попытки подготовлен новый
+disposable clone `.scratch/qwen-role-lifecycle-pilot-20260927-owner-context-01`.
+Его live запуск должен быть выполнен из owner-controlled PowerShell, где probe
+прошёл; agent host не может использовать другой Windows identity.
+
+## Ticket 25 — BLOCKED_EVIDENCE_SOURCE (2026-09-28)
+
+Read-only проверка owner-controlled окружения не нашла trace live запуска
+`46d14fc6e82c47118a3f1d1a96b549de` (`.scratch`, `.tmp`, `.worktrees`, `%TEMP%`,
+`AppData\Local\Temp`, `~\.qwen\tmp`, содержимое репозитория). Сырой JSONL
+удаляется после raw-free projection, поэтому фактический native dialect
+наблюдавшегося запуска невосстановим. По условию тикета схема не угадывалась,
+native protocol launch ради trace не повторялся, fail-closed
+`EVENT_SCHEMA_UNKNOWN` не ослаблялся. Ticket 25 зафиксирован как
+`BLOCKED_EVIDENCE_SOURCE`; следующий диагностический шаг — отдельное решение
+владельца (см. D069).
+
+## Ticket 26 — progress checkpoint для role-agents (2026-09-28)
+
+Владелец авторизовал реализацию seam и checkpoint policy независимо от
+недоказанной event-схемы Ticket 25: checkpoint считается по наблюдаемым
+role-agent tool calls, неизвестные формы событий остаются fail-closed и не
+дают checkpoint authority. Порог шесть — точка проверки, не hard cap и не
+причинный порог; выборка Ticket 314 (22 запуска, включая fork с нулём tool
+calls и одну отмену) фиксируется как correlation, не causation. Петли
+(`exact_tool_interaction_cycle_v1`) остаются немедленным terminal stop,
+silent failure классифицируется отдельно без автоматического retry,
+внешние лимиты `20/20/30m/depth 1` и Qwen settings не меняются.
+
+## Сводка на 2026-10-01
+
+Локальный `qwen --version` возвращает `0.24.7`; capability smoke и модельный
+protocol pilot на этой версии не выполнялись. Последнее описанное live evidence
+не доказывает полный Controller → Implementer → Reviewer → Verifier lifecycle
+или acceptance. Tickets 24 и 25 остаются `BLOCKED_EVIDENCE_SOURCE`, Ticket 26
+проверен только локальными fixtures. Для следующего live pilot нужен
+owner-controlled Windows host с доступным credential и отдельное решение об
+источнике event evidence; повтор прежнего запуска не является проверкой схемы.
+
+Исторические результаты тестов относятся к состоянию кода на момент запуска;
+итоговые изменения проверяются перед публикацией отдельно.

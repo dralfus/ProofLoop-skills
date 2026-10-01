@@ -15,6 +15,8 @@ try {
     $invocationContract = $registryJson | ConvertFrom-Json
     $markerNames = @{
         '--prompt' = 'prompt'
+        '--output-format' = 'output_format'
+        'stream-json' = 'stream_json_output'
         '--max-session-turns' = 'max_session_turns'
         '--max-tool-calls' = 'max_tool_calls'
         '--max-wall-time' = 'max_wall_time'

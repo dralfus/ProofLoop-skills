@@ -38,7 +38,7 @@ codex plugin add agentic-development-workflow@personal
 task. Для plugin из этого репозитория не требуется ZIP, PowerShell installer
 или копирование workflow-файлов в проект разработки.
 
-Для Qwen Code v0.22.2 из того же clone выполните:
+Для установленного Qwen Code из того же clone выполните:
 
 ```powershell
 qwen extensions install .

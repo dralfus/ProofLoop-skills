@@ -33,10 +33,11 @@ codex plugin add agentic-development-workflow@personal
 qwen extensions install .
 ```
 
-Нативный manifest `qwen-extension.json` делает существующий `finish-ticket`
-skill discoverable и добавляет named agent `finish-ticket-controller`; это не
-вторая копия lifecycle. После установки проверьте `/skills` и `/agents manage`,
-затем запустите:
+Нативный manifest `qwen-extension.json` добавляет named agent
+`finish-ticket-controller`; lifecycle не копируется. Extension skills вызываются
+как `/<extension-name>:<skill-name>`, а protocol использует отдельный личный
+`/finish-ticket`. Если нужен named agent, установку extension проверяйте через
+`/agents manage`; личный Skill — через `/skills`, затем запускайте:
 
 ```text
 /finish-ticket ticket <ID или путь>
@@ -44,23 +45,27 @@ skill discoverable и добавляет named agent `finish-ticket-controller`;
 
 Обновление локально установленного extension требует `qwen extensions update
 proofloop-skills`. Требуемые возможности проверяются preflight; версия CLI не
-является allow-list. Полная процедура native role-lifecycle pilot и его статус
-`NOT_RUN` описаны в `experiments/qwen-code-v0222-pilot.md`. Владелец подтвердил,
-что CLI установлен и отвечает; полный `$finish-ticket` pilot с несколькими
-repair candidates ещё не выполнялся.
+является allow-list. Процедура native role-lifecycle pilot описана в
+`experiments/qwen-code-v0222-pilot.md`; её актуальный live статус находится в
+`current-state.md`. Владелец подтвердил, что CLI установлен и отвечает;
+успешный полный `$finish-ticket` role lifecycle пока не доказан.
 
 ### Guarded native Qwen launch
 
-Для `$finish-ticket` используйте ProofLoop launcher, передав путь к уже
-установленному ProofLoop extension. Например:
+Для `$finish-ticket` используйте ProofLoop launcher; protocol по умолчанию
+проверяет личный Skill `~/.qwen/skills/finish-ticket/SKILL.md`. Например:
 
 ```powershell
-.\scripts\invoke_qwen_finish_ticket.ps1 -Ticket 16 -ExtensionRoot <installed-proofloop-extension-root>
+.\scripts\invoke_qwen_finish_ticket.ps1 -Ticket 16
 ```
 
-Launcher только читает `~/.qwen/settings.json` и extension manifest, блокирует
-недопустимую local configuration до запуска Qwen, передаёт bounded outer limits и
-пишет raw-free `QWEN_SESSION_GUARD` receipt в `%LOCALAPPDATA%\ProofLoop Skills`.
+Protocol launcher только читает `~/.qwen/settings.json` и личный Skill
+frontmatter, блокирует недопустимую local configuration или отсутствующий/
+несовпадающий `finish-ticket` до protocol dispatch, передаёт bounded outer
+limits и пишет raw-free `QWEN_SESSION_GUARD` receipt в
+`%LOCALAPPDATA%\ProofLoop Skills`. Это подтверждает соответствие установленного
+file preflight, но не факт runtime-регистрации в CLI. Recon отдельно сохраняет
+extension-manifest gate.
 Перед ticket work launcher проверяет обязательные CLI capabilities и canonical
 argv compatibility; версия Qwen только сохраняется в отдельном smoke evidence и
 не используется как allow-list. Он не меняет settings, API key, endpoint, model,
@@ -99,8 +104,13 @@ ledger блокирует запуск.
 
 Checkpoint и runtime ledger остаются raw-free: не записывайте prompt, секреты,
 paths, diff text, команды или raw output. Настройки пользователя, provider,
-reasoning и sampling Qwen не меняются; session ceilings остаются `20 turns /
-20 tool calls / 30m / depth 1`.
+reasoning и sampling Qwen не меняются. Обычный protocol ceiling — `20 turns /
+20 tool calls / 30m / depth 1`; единственный opt-in `pilot-expanded` profile
+может повысить только tool-call ceiling до 40 и только для owner-authorized
+test-only `qwen-protocol-pilot-ticket.md` в disposable checkout под `.scratch`.
+Launcher и CLI consumer независимо проверяют ticket/scope markers до Qwen
+dispatch. Model setting `model.maxToolCallsPerTurn` не меняется; guard receipt
+v2 связывает эту разницу с `budget_profile`.
 
 Checkpoint — trusted Controller input, а не самостоятельная аттестация runtime:
 policy проверяет schema/hash/linkage/ledger consistency, но не перепроверяет
@@ -115,17 +125,25 @@ session. Checkpoint и evidence IDs сохраняются как consumed, чт
 повторный dispatch; Controller должен использовать возвращённый append-only
 runtime ledger для следующего шага.
 
-Для protocol sessions launcher добавляет временный `--json-file` sidecar; он
-может содержать prompt и tool payloads, поэтому не копируйте его в logs или
-permanent receipts. Supervisor tail-ит только полные записи, владеет process
-tree и после raw-free projection удаляет sidecar. Распознанный `qwen.cmd`
-запускается через Node напрямую с исходным argv. Capability `--help` preflight
-использует тот же проверенный adapter: неизвестный wrapper не исполняется даже
-на раннем preflight.
+Protocol запускает личный `/finish-ticket` headless-командой
+`--output-format stream-json --prompt "/finish-ticket ticket N"`; полного
+stream-json stdout может содержать prompt и tool payloads, поэтому он временный,
+не копируется в logs/permanent receipts и удаляется после raw-free projection.
+Первый system event должен иметь subtype `init` или `session_start` и валидный
+session id; финальный matching-session `type=result` закрывает headless stream.
+Assistant `thinking` content block принимается только при строковом поле и
+отбрасывается до формирования raw-free evidence: reasoning не попадает в
+receipts, role projection или повторяющиеся tool-cycle fingerprints. Неизвестные
+типы и malformed blocks остаются fail-closed; контракт не закрепляет версию CLI.
+Supervisor tail-ит только полные записи и владеет process tree. Распознанный
+`qwen.cmd` запускается через Node напрямую с исходным argv. Capability `--help`
+preflight использует тот же проверенный adapter: неизвестный wrapper не
+исполняется даже на раннем preflight.
 
 D051 добавил локальный host-owned terminal receipt. Continuation требует
 `HOST_WALL_LIMIT` или `HOST_TOOL_LIMIT`, установленный supervisor до завершения
-процесса, post-stop `session_end`, закрытый process tree, полный
+процесса, post-stop terminal event (`type=result` либо поддерживаемый
+`session_end`), закрытый process tree, полный
 `event_coverage=COMPLETE`, валидный checkpoint и `HOST_CLEAR` от
 `exact_tool_interaction_cycle_v1`. `HOST_CLEAR` означает только отсутствие
 трёх подряд идентичных завершённых interaction cycles по этой версии detector;
@@ -147,6 +165,23 @@ versioned raw-free `QWEN_TERMINAL_OUTCOME` и при failure; это локал�
 synthetic regression, но не является повторной live-проверкой и не утверждает,
 что в нём доступны Qwen runtime events.
 
+Текущий `QWEN_TERMINAL_OUTCOME` v5 сохраняет только enum `cli_stage` в nested
+launch diagnostic (`NOT_REACHED`, capture/credential/supervisor phases,
+runtime projection), при fail-closed projection — безопасные partial event
+counters и отдельный allowlisted `runtime_projection_reason`. Неполная или
+malformed строка и любые raw values отбрасываются. Эти поля диагностические и
+не дают terminal/role success, continuation или acceptance authority. Ни
+exception text, ни ключ, prompt или raw output не публикуются. Версия CLI не
+участвует в классификации; решения D063/D066/D067/D068 — в `docs/decisions.md`.
+
+Для отдельной bounded protocol-диагностики можно явно передать `-ShowOutput`:
+stdout/stderr дочернего Qwen будут видны оператору, а стандартный режим
+останется подавленным. `QWEN_TERMINAL_OUTCOME` содержит только allowlisted
+launch stages, process state/exit code и state/size event file; raw output туда
+не попадает.
+Этот режим не меняет settings/provider/credentials, authority gates или
+continuation policy. После любого failure retry требует отдельного разрешения.
+
 Отдельный failure envelope `type=result` с `is_error=true` классифицируется как
 `QWEN_JSON_ERROR_RESULT`: сохраняются только boolean, allowlisted subtype,
 presence/category `error.message`, hashed session id, доступные counters,
@@ -161,6 +196,25 @@ terminal facts. Решение и regression criterion: D050 в `docs/decisions.
 Mode-specific argv и capability markers берутся из pure registry
 `scripts/qwen_invocation_contract.py`: `assist`, `native_recon`, `protocol`,
 `seal` и `capability_smoke` не сводятся к одному универсальному режиму.
+
+Ранее принятое D053 требовало `--prompt-interactive`, но оно было заменено D059
+после live failure при redirected console streams. Текущий protocol передаёт
+личный `/finish-ticket` через headless `--prompt` и получает события через
+`--output-format stream-json`; capability preflight и guard policy независимо
+проверяют соответствующие markers. Preflight проверяет личный Skill-файл и
+`name: finish-ticket`; extension manifest не требуется. D059 не привязан к
+конкретной версии Qwen CLI и не меняет пользовательские настройки или профили.
+Headless terminal projection принимает начальный system subtype `init` или
+`session_start` только с валидным session id; неизвестные формы остаются
+fail-closed.
+Локальные fixtures не доказывают live role lifecycle: bounded E2E остаётся
+неподтверждённым, пока host receipt и Controller → Implementer → Reviewer →
+Verifier role projection не станут COMPLETE в одной связанной сессии.
+
+Protocol mode не задаёт `QWEN_CODE_MAX_OUTPUT_TOKENS`: Qwen использует output
+budget, определённый своей моделью/пользовательской конфигурацией. Workflow
+сохраняет независимые turn/tool/time/depth ceilings; подробности — D061 в
+`docs/decisions.md`.
 
 Mode-specific argv и capability markers берутся из pure registry
 `scripts/qwen_invocation_contract.py`: `assist`, `native_recon`, `protocol`,
@@ -249,14 +303,26 @@ capabilities: проверяемый inventory model ID/tier/effort, dispatch/co
 протоколу, записывает requested/selected tier и degradation reason; Luna,
 Terra и Sol — лишь примеры текущего registry, не правило маршрутизации.
 
-Qwen Code v0.22.2 проходит отдельный fixture preflight только при exact
-declaration `provider: qwen`, `product: qwen-code`, `version: 0.22.2`.
+Qwen проходит fixture preflight при identity `provider: qwen`,
+`product: qwen-code`; observed `version` сохраняется как evidence, но не
+используется как allow-list.
 Configured и active model IDs должны совпадать и role model identity lock
-должен применяться ко всем ролям; также обязательны fresh named subagent,
+должен применяться ко всем ролям; runtime capability checks должны
+подтверждать fresh named subagent,
 continuation исходного Implementer, fresh read-only Reviewer без
 fork/write и executable verification command. Любое отсутствие даёт
 `BLOCKED_CAPABILITY`. Успех фиксирует одну verified identity для всех ролей и
 `usage: AVAILABLE|NOT_AVAILABLE`.
+
+После завершения live protocol host сохраняет отдельную raw-free
+role_lifecycle_evidence, связанную с terminal receipt по launch/session
+identity. Она доказывает фактические именованные Implementer → Reviewer →
+Verifier dispatch и matched tool-result completion, но не качество patch или
+acceptance; эти утверждения требуют независимого review и verification.
+
+Если скрытый protocol child завершился без полного JSONL, supervisor временно
+классифицирует его stdout/stderr и публикует только raw-free category/status;
+исходный текст удаляется, а неполный terminal evidence остаётся failure.
 
 Для Ticket 18 controlled fixture допускается owner-authorized declaration
 `configured_model_id: qwen38-flash-next` с identity source
@@ -330,6 +396,11 @@ projection/других дочерних процессов, а `finally` стр
 использует настройки Qwen без их переопределения. Отсутствующий credential —
 `INFRASTRUCTURE_BLOCKER` до первого turn; token не попадает в settings,
 пользовательский environment, ticket packet, report или metrics.
+В protocol CLI compatibility consumer запускается отдельным экземпляром
+текущего PowerShell host; secret не передаётся в argv. Проверенный continuation
+packet передаётся между launcher слоями через временный UTF-8 файл, который
+удаляется после dispatch. Максимальный continuation context — `14,000 UTF-8
+bytes`, ограничение Windows argv, а не бюджет модели; см. D064–D065.
 Первый Qwen-вызов читает код из clean fixed-point worktree и возвращает только
 `QWEN_RECON_REPORT`: минимум три факта `file:line -> fact`, state owner,
 callback boundary и acceptance risk. Он не пишет файлы и не запускает shell,

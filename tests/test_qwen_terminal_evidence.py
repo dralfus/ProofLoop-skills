@@ -9,7 +9,7 @@ SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from qwen_terminal_evidence import project_terminal_receipt
+from qwen_terminal_evidence import project_role_lifecycle, project_terminal_receipt
 
 
 def interaction_events(
@@ -44,7 +44,11 @@ def interaction_events(
     ]
 
 
-def event_stream(*cycles: list[dict[str, object]], session_end: bool = True) -> list[dict[str, object]]:
+def event_stream(
+    *cycles: list[dict[str, object]],
+    session_end: bool = True,
+    terminal: str = "session_end",
+) -> list[dict[str, object]]:
     events: list[dict[str, object]] = [
         {"type": "system", "subtype": "session_start", "session_id": "private-session-id"},
         {
@@ -54,7 +58,16 @@ def event_stream(*cycles: list[dict[str, object]], session_end: bool = True) -> 
     ]
     for cycle in cycles:
         events.extend(cycle)
-    if session_end:
+    if session_end and terminal == "result":
+        events.append(
+            {
+                "type": "result",
+                "subtype": "success",
+                "session_id": "private-session-id",
+                "is_error": False,
+            }
+        )
+    elif session_end:
         events.append({"type": "system", "subtype": "session_end", "data": {"reason": "clean"}})
     return events
 
@@ -64,6 +77,42 @@ def event_jsonl(events: list[dict[str, object]]) -> str:
         json.dumps(event, ensure_ascii=True, separators=(",", ":")) + "\n"
         for event in events
     )
+
+
+def role_call(
+    role: str,
+    prompt: str,
+    result: str,
+    index: int,
+    *,
+    is_error: bool = False,
+    resume_agent_id: str | None = None,
+    fork_turns: str | None = None,
+    tool_name: str = "Agent",
+) -> list[dict[str, object]]:
+    call_input: dict[str, object] = {"subagent_type": role, "prompt": prompt}
+    if resume_agent_id is not None:
+        call_input["resume_agent_id"] = resume_agent_id
+    if fork_turns is not None:
+        call_input["fork_turns"] = fork_turns
+    tool_id = f"private-agent-tool-{index}"
+    return [
+        {
+            "type": "assistant",
+            "message": {
+                "id": f"private-agent-message-{index}",
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": tool_id, "name": tool_name, "input": call_input}],
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": tool_id, "content": result, "is_error": is_error}],
+            },
+        },
+    ]
 
 
 def observation(
@@ -96,6 +145,148 @@ def serialized(receipt: dict[str, object]) -> str:
 
 
 class QwenTerminalEvidenceTest(unittest.TestCase):
+    def test_headless_stream_json_result_completes_terminal_and_role_projections(self) -> None:
+        events = event_stream(
+            role_call("finish-ticket-implementer", "private implementation prompt", "private implementation output", 1),
+            role_call("finish-ticket-reviewer", "private review prompt", "private review output", 2),
+            role_call("finish-ticket-verifier", "private verification prompt", "private verification output", 3),
+            terminal="result",
+        )
+
+        receipt = project_terminal_receipt(event_jsonl(events), observation(), expected_launch_id="a" * 32)
+        roles = project_role_lifecycle(event_jsonl(events), expected_launch_id="a" * 32)
+
+        self.assertEqual(receipt["status"], "COMPLETE")
+        self.assertEqual(receipt["event_coverage"], "COMPLETE")
+        self.assertEqual(receipt["turns"], 3)
+        self.assertEqual(receipt["tool_calls"], 3)
+        self.assertEqual(receipt["loop_status"], "HOST_CLEAR")
+        self.assertEqual(roles["status"], "COMPLETE")
+        self.assertEqual([call["role"] for call in roles["role_calls"]], [
+            "finish-ticket-implementer", "finish-ticket-reviewer", "finish-ticket-verifier",
+        ])
+
+    def test_headless_init_result_completes_terminal_and_role_projections(self) -> None:
+        events = event_stream(
+            role_call("finish-ticket-implementer", "private implementation prompt", "private implementation output", 4),
+            role_call("finish-ticket-reviewer", "private review prompt", "private review output", 5),
+            role_call("finish-ticket-verifier", "private verification prompt", "private verification output", 6),
+            terminal="result",
+        )
+        events[0]["subtype"] = "init"
+        for event in events:
+            if event.get("type") == "assistant":
+                event["message"]["content"].insert(0, {"type": "thinking", "thinking": "private reasoning block"})
+
+        receipt = project_terminal_receipt(event_jsonl(events), observation(), expected_launch_id="a" * 32)
+        roles = project_role_lifecycle(event_jsonl(events), expected_launch_id="a" * 32)
+
+        self.assertEqual(receipt["status"], "COMPLETE")
+        self.assertEqual(receipt["event_coverage"], "COMPLETE")
+        self.assertEqual(receipt["turns"], 3)
+        self.assertEqual(receipt["tool_calls"], 3)
+        self.assertEqual(roles["status"], "COMPLETE")
+        self.assertEqual(len(roles["role_calls"]), 3)
+        self.assertNotIn("private reasoning block", serialized(receipt))
+        self.assertNotIn("private reasoning block", serialized(roles))
+
+    def test_thinking_blocks_do_not_change_repeated_tool_cycle_fingerprints(self) -> None:
+        cycles = [interaction_events(index=index) for index in range(1, 4)]
+        for index, cycle in enumerate(cycles, start=1):
+            cycle[0]["message"]["content"].insert(0, {
+                "type": "thinking",
+                "thinking": f"private reasoning variation {index}",
+            })
+        events = event_stream(*cycles)
+
+        receipt = project_terminal_receipt(event_jsonl(events), observation(), expected_launch_id="a" * 32)
+
+        self.assertEqual(receipt["loop_status"], "DETECTED")
+        self.assertNotIn("private reasoning variation", serialized(receipt))
+
+    def test_headless_result_must_match_session_and_be_final(self) -> None:
+        events = event_stream(terminal="result")
+        events[-1]["session_id"] = "other-private-session"
+
+        mismatched = project_terminal_receipt(event_jsonl(events), observation(), expected_launch_id="a" * 32)
+
+        events[-1]["session_id"] = "private-session-id"
+        events.append({"type": "assistant", "message": {"id": "late-message", "role": "assistant", "content": []}})
+        non_final = project_terminal_receipt(event_jsonl(events), observation(), expected_launch_id="a" * 32)
+
+        self.assertEqual(mismatched["status"], "BLOCKED")
+        self.assertEqual(non_final["status"], "BLOCKED")
+
+    def test_role_lifecycle_requires_completed_fresh_named_roles_in_order(self) -> None:
+        events = event_stream(
+            role_call("finish-ticket-implementer", "private implementation prompt", "private implementation output", 10),
+            role_call("finish-ticket-reviewer", "private review prompt", "private review output", 11, tool_name="agent"),
+            role_call("finish-ticket-verifier", "private verification prompt", "private verification output", 12),
+        )
+
+        projection = project_role_lifecycle(event_jsonl(events), expected_launch_id="a" * 32)
+
+        self.assertEqual(projection["status"], "COMPLETE")
+        self.assertEqual(projection["reason"], "ROLE_LIFECYCLE_COMPLETE")
+        self.assertEqual(
+            [call["role"] for call in projection["role_calls"]],
+            ["finish-ticket-implementer", "finish-ticket-reviewer", "finish-ticket-verifier"],
+        )
+        self.assertTrue(all(call["fresh_named"] for call in projection["role_calls"]))
+        self.assertTrue(all(call["completion"] == "COMPLETED" for call in projection["role_calls"]))
+        rendered = json.dumps(projection)
+        for forbidden in ("private implementation prompt", "private review output", "private verification prompt"):
+            self.assertNotIn(forbidden, rendered)
+
+    def test_role_lifecycle_blocks_unknown_and_resumed_agents_without_leaking_names(self) -> None:
+        events = event_stream(
+            role_call("secret-unrecognized-agent", "private prompt", "private result", 20),
+            role_call("finish-ticket-implementer", "private prompt", "private result", 21),
+            role_call("finish-ticket-reviewer", "private prompt", "private result", 22, resume_agent_id="private-agent-id"),
+            role_call("finish-ticket-verifier", "private prompt", "private result", 23),
+        )
+
+        projection = project_role_lifecycle(event_jsonl(events), expected_launch_id="b" * 32)
+
+        self.assertEqual(projection["status"], "BLOCKED")
+        self.assertEqual(projection["reason"], "ROLE_AGENT_UNCLASSIFIED")
+        self.assertEqual(projection["unclassified_agent_calls"], 1)
+        self.assertFalse(projection["role_calls"][1]["fresh_named"])
+        rendered = json.dumps(projection)
+        for forbidden in ("secret-unrecognized-agent", "private prompt", "private result", "private-agent-id"):
+            self.assertNotIn(forbidden, rendered)
+
+    def test_role_lifecycle_blocks_failed_or_incomplete_dispatch(self) -> None:
+        failed = event_stream(
+            role_call("finish-ticket-implementer", "private prompt", "private result", 30, is_error=True),
+            role_call("finish-ticket-reviewer", "private prompt", "private result", 31),
+            role_call("finish-ticket-verifier", "private prompt", "private result", 32),
+        )
+        missing_verifier = event_stream(
+            role_call("finish-ticket-implementer", "private prompt", "private result", 33),
+            role_call("finish-ticket-reviewer", "private prompt", "private result", 34),
+        )
+
+        failed_projection = project_role_lifecycle(event_jsonl(failed), expected_launch_id="c" * 32)
+        missing_projection = project_role_lifecycle(event_jsonl(missing_verifier), expected_launch_id="d" * 32)
+
+        self.assertEqual(failed_projection["status"], "BLOCKED")
+        self.assertEqual(failed_projection["reason"], "ROLE_CALL_FAILED")
+        self.assertEqual(missing_projection["status"], "BLOCKED")
+        self.assertEqual(missing_projection["reason"], "ROLE_CALL_MISSING")
+
+    def test_role_lifecycle_rejects_fork_arguments(self) -> None:
+        events = event_stream(
+            role_call("finish-ticket-implementer", "private prompt", "private result", 40),
+            role_call("finish-ticket-reviewer", "private prompt", "private result", 41, fork_turns="3"),
+            role_call("finish-ticket-verifier", "private prompt", "private result", 42),
+        )
+
+        projection = project_role_lifecycle(event_jsonl(events), expected_launch_id="e" * 32)
+
+        self.assertEqual(projection["status"], "BLOCKED")
+        self.assertEqual(projection["reason"], "ROLE_NOT_FRESH_NAMED")
+
     def test_complete_stream_without_identical_cycle_is_host_clear(self) -> None:
         events = event_stream(
             interaction_events(assistant_text="Read the source.", result="source v1", index=1),
@@ -204,6 +395,67 @@ class QwenTerminalEvidenceTest(unittest.TestCase):
         self.assertEqual(receipt["loop_status"], "UNKNOWN")
         self.assertNotEqual(receipt["event_coverage"], "COMPLETE")
 
+    def test_incomplete_terminal_preserves_only_raw_free_observed_counters(self) -> None:
+        events = event_stream(
+            role_call("finish-ticket-implementer", "private role prompt", "private role result", 1, is_error=True),
+            session_end=False,
+        )
+        process = observation()
+        process["process_exit_code"] = 1
+
+        receipt = project_terminal_receipt(
+            event_jsonl(events), process, expected_launch_id="a" * 32
+        )
+
+        self.assertEqual(receipt["status"], "BLOCKED")
+        self.assertEqual(receipt["terminal_reason"], "UNKNOWN")
+        self.assertEqual(
+            receipt["partial_observation"],
+            {
+                "event_lines_observed": 4,
+                "assistant_turns_observed": 1,
+                "tool_dispatches_observed": 1,
+                "tool_results_observed": 1,
+                "tool_errors_observed": 1,
+                "agent_dispatches_observed": 1,
+                "terminal_result_seen": False,
+            },
+        )
+        self.assertNotIn("private role prompt", serialized(receipt))
+        self.assertNotIn("private role result", serialized(receipt))
+
+    def test_truncated_or_malformed_jsonl_preserves_only_complete_raw_free_prefix(self) -> None:
+        events = event_stream(
+            role_call("finish-ticket-implementer", "private role prompt", "private role result", 1, is_error=True),
+        )
+        valid_stream = event_jsonl(events)
+        malformed_tail = event_jsonl(events[:-1]) + '{"type":"result","private":"secret"\n'
+
+        for raw_stream in (valid_stream[:-1], malformed_tail):
+            with self.subTest(raw_stream_kind="truncated" if raw_stream == valid_stream[:-1] else "malformed"):
+                receipt = project_terminal_receipt(
+                    raw_stream, observation(), expected_launch_id="a" * 32
+                )
+
+                self.assertEqual(receipt["status"], "BLOCKED")
+                self.assertEqual(receipt["event_coverage"], "INCOMPLETE")
+                self.assertEqual(receipt["loop_status"], "UNKNOWN")
+                self.assertEqual(
+                    receipt["partial_observation"],
+                    {
+                        "event_lines_observed": 4,
+                        "assistant_turns_observed": 1,
+                        "tool_dispatches_observed": 1,
+                        "tool_results_observed": 1,
+                        "tool_errors_observed": 1,
+                        "agent_dispatches_observed": 1,
+                        "terminal_result_seen": False,
+                    },
+                )
+                self.assertNotIn("private role prompt", serialized(receipt))
+                self.assertNotIn("private role result", serialized(receipt))
+                self.assertNotIn("secret", serialized(receipt))
+
     def test_duplicate_tool_ids_yield_unknown(self) -> None:
         first = interaction_events(index=1)
         second = interaction_events(index=2)
@@ -227,6 +479,17 @@ class QwenTerminalEvidenceTest(unittest.TestCase):
 
         self.assertEqual(receipt["loop_status"], "UNKNOWN")
         self.assertNotIn("secret-value", serialized(receipt))
+
+    def test_malformed_thinking_block_yields_unknown_without_raw_echo(self) -> None:
+        cycle = interaction_events(index=1)
+        cycle[0]["message"]["content"].insert(0, {"type": "thinking", "thinking": 17})
+
+        receipt = project_terminal_receipt(
+            event_jsonl(event_stream(cycle)), observation(), expected_launch_id="a" * 32
+        )
+
+        self.assertEqual(receipt["loop_status"], "UNKNOWN")
+        self.assertNotIn("17", serialized(receipt))
 
     def test_unterminated_final_jsonl_line_is_incomplete(self) -> None:
         raw = event_jsonl(event_stream())[:-1]

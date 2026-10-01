@@ -20,6 +20,16 @@ PROTOCOL_LIMITS = {
     "max_wall_time": "30m",
     "max_subagent_depth": 1,
 }
+PILOT_EXPANDED_PROTOCOL_LIMITS = {
+    "max_session_turns": 20,
+    "max_tool_calls": 40,
+    "max_wall_time": "30m",
+    "max_subagent_depth": 1,
+}
+PROTOCOL_BUDGET_PROFILES = {
+    "standard": (PROTOCOL_LIMITS, 1),
+    "pilot-expanded": (PILOT_EXPANDED_PROTOCOL_LIMITS, 2),
+}
 RECON_LIMITS = {
     "max_session_turns": 3,
     "max_tool_calls": 6,
@@ -30,11 +40,12 @@ CAPABILITY_MARKERS = {
     "protocol": frozenset(
         {
             "--prompt",
+            "--output-format",
+            "stream-json",
             "--max-session-turns",
             "--max-tool-calls",
             "--max-wall-time",
             "--max-subagent-depth",
-            "--json-file",
         }
     ),
     "recon": frozenset(
@@ -69,6 +80,7 @@ _ALLOWED_INPUT_FIELDS = {
     "capabilities",
     "receipt",
     "terminal_stop",
+    "protocol_budget_profile",
 }
 
 
@@ -166,21 +178,33 @@ def _valid_receipt(
     now: datetime,
     max_age_seconds: int,
     worktree: dict[str, object],
+    protocol_budget_profile: str,
 ) -> str | None:
     if not isinstance(receipt, dict):
         return "RECEIPT_MISSING" if receipt is None else "RECEIPT_MISMATCHED"
     expected_type = "QWEN_SESSION_GUARD" if mode == "protocol" else "QWEN_RECON_GUARD"
-    expected_limits = PROTOCOL_LIMITS if mode == "protocol" else RECON_LIMITS
+    expected_limits, expected_version = (
+        PROTOCOL_BUDGET_PROFILES[protocol_budget_profile]
+        if mode == "protocol"
+        else (RECON_LIMITS, 1)
+    )
+    capability_field = "finish_ticket_skill_available" if mode == "protocol" else "extension_available"
     if (
         receipt.get("receipt_type") != expected_type
-        or receipt.get("receipt_version") != 1
+        or receipt.get("receipt_version") != expected_version
         or receipt.get("mode") != mode
         or not _valid_identity(receipt.get("launch_id"))
         or receipt.get("limits") != expected_limits
         or receipt.get("loop_detection") is not True
-        or receipt.get("extension_available") is not True
+        or receipt.get(capability_field) is not True
     ):
         return "RECEIPT_MISMATCHED"
+    if mode == "protocol":
+        if protocol_budget_profile == "pilot-expanded":
+            if receipt.get("budget_profile") != protocol_budget_profile:
+                return "RECEIPT_MISMATCHED"
+        elif "budget_profile" in receipt:
+            return "RECEIPT_MISMATCHED"
     issued_at = _parse_utc(receipt.get("issued_at_utc"))
     if issued_at is None:
         return "RECEIPT_MISMATCHED"
@@ -225,6 +249,14 @@ def evaluate_guard_policy(payload: object) -> dict[str, object]:
     mode = payload.get("mode")
     if mode not in ("protocol", "recon"):
         return blocked("MALFORMED_GUARD_INPUT")
+    protocol_budget_profile = payload.get("protocol_budget_profile", "standard")
+    if mode == "protocol" and (
+        not isinstance(protocol_budget_profile, str)
+        or protocol_budget_profile not in PROTOCOL_BUDGET_PROFILES
+    ):
+        return blocked("PROTOCOL_BUDGET_PROFILE_INVALID")
+    if mode == "recon" and protocol_budget_profile != "standard":
+        return blocked("PROTOCOL_BUDGET_PROFILE_INVALID")
     terminal = payload.get("terminal_stop")
     if not isinstance(terminal, bool):
         return blocked("MALFORMED_GUARD_INPUT")
@@ -242,17 +274,25 @@ def evaluate_guard_policy(payload: object) -> dict[str, object]:
     if worktree_reason is not None:
         return blocked(worktree_reason)
     worktree = payload["worktree"]
-    receipt_reason = _valid_receipt(mode, payload.get("receipt"), now, max_age, worktree)
+    receipt_reason = _valid_receipt(
+        mode, payload.get("receipt"), now, max_age, worktree,
+        str(protocol_budget_profile),
+    )
     if receipt_reason is not None:
         return blocked(receipt_reason)
     if terminal:
         return terminal_stop("TERMINAL_STOP_ACTIVE")
 
-    limits = dict(PROTOCOL_LIMITS if mode == "protocol" else RECON_LIMITS)
+    limits = dict(
+        PROTOCOL_BUDGET_PROFILES[str(protocol_budget_profile)][0]
+        if mode == "protocol"
+        else RECON_LIMITS
+    )
     recon = mode == "recon"
     return {
         "status": "QWEN_GUARD_READY",
         "mode": mode,
+        "protocol_budget_profile": protocol_budget_profile,
         "limits": limits,
         "loop_detection": True,
         "read_only": recon,

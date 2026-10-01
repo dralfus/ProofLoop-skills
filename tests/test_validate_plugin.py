@@ -42,7 +42,8 @@ class ValidatePluginTest(unittest.TestCase):
                     "настройки пользователя",
                     "Controller-attested",
                     "не перепроверяет внешний progress ledger",
-                    "--json-file",
+                    "--output-format",
+                    "stream-json",
                     "-ContinuationEvidencePath",
                     "QWEN_RUNTIME_EVIDENCE_UNSUPPORTED",
                     "HOST_WALL_LIMIT",
@@ -113,35 +114,49 @@ class ValidatePluginTest(unittest.TestCase):
         self.assertEqual(qwen_no_capability_result.returncode, 0, qwen_no_capability_result.stderr)
         self.assertEqual(json.loads(qwen_no_capability_result.stdout)["status"], "BLOCKED_CAPABILITY")
 
-    def test_selects_qwen_profile_from_trusted_v0222_declaration(self) -> None:
-        result = self.run_policy(
-            {
-                "runtime": {"provider": "qwen", "product": "qwen-code", "version": "0.22.2"},
-                "configured_model": {"id": "qwen3-coder-plus"},
-                "active_model": {"id": "qwen3-coder-plus"},
-                "role_model_identity_lock": True,
-                "fresh_named_subagent": True,
-                "implementer_continuation": True,
-                "reviewer_policy": {
-                    "fresh_named": True,
-                    "fork": False,
-                    "write": False,
-                    "tool_classes": ["read", "verify"],
-                },
-                "verification_command": "python -m unittest",
-                "observed_usage": False,
-            }
-        )
+    def test_selects_qwen_profile_from_observed_runtime_capabilities(self) -> None:
+        for version in ("0.24.6", "9.0.0-rc.1"):
+            with self.subTest(version=version):
+                capabilities = self.qwen_capabilities()
+                capabilities["runtime"]["version"] = version
+                result = self.run_policy(capabilities)
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                profile = json.loads(result.stdout)
+                self.assertEqual(profile["status"], "QWEN_PROFILE")
+                self.assertEqual(profile["configuration"]["runtime"]["version"], version)
+
+    def test_qwen_profile_requires_an_observed_version_but_does_not_pin_it(self) -> None:
+        capabilities = self.qwen_capabilities()
+        capabilities["runtime"].pop("version")
+
+        result = self.run_policy(capabilities)
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            result.stdout,
-            '{"configuration": {"model": {"id": "qwen3-coder-plus"}, "roles": {"controller": {"id": "qwen3-coder-plus"}, "implementer": {"id": "qwen3-coder-plus"}, "reviewer": {"id": "qwen3-coder-plus"}, "verifier": {"id": "qwen3-coder-plus"}}, "runtime": {"product": "qwen-code", "provider": "qwen", "version": "0.22.2"}}, "repair_policy": "QWEN_CONVERGENT", "status": "QWEN_PROFILE", "usage": "NOT_AVAILABLE"}\n',
+            json.loads(result.stdout),
+            {"status": "BLOCKED_CAPABILITY", "untrusted_capabilities": ["runtime"]},
+        )
+
+    def test_qwen_candidate_trace_preserves_a_non_pinned_runtime_version(self) -> None:
+        self.assertTrue(
+            VALIDATE_PLUGIN.has_complete_candidate_trace(
+                {
+                    "normalized_root_cause": "missing-null-guard",
+                    "runtime": {
+                        "provider": "qwen",
+                        "product": "qwen-code",
+                        "version": "0.24.6",
+                    },
+                    "model": {"id": "qwen3-coder-plus"},
+                    "usage": "NOT_AVAILABLE",
+                }
+            )
         )
 
     def test_qwen_profile_blocks_a_reviewer_that_can_fork_or_write(self) -> None:
         capabilities = {
-            "runtime": {"provider": "qwen", "product": "qwen-code", "version": "0.22.2"},
+            "runtime": {"provider": "qwen", "product": "qwen-code", "version": "0.24.6"},
             "configured_model": {"id": "qwen3-coder-plus"},
             "active_model": {"id": "qwen3-coder-plus"},
             "role_model_identity_lock": True,
@@ -167,7 +182,7 @@ class ValidatePluginTest(unittest.TestCase):
 
     def test_qwen_profile_blocks_a_changed_active_model(self) -> None:
         capabilities = {
-            "runtime": {"provider": "qwen", "product": "qwen-code", "version": "0.22.2"},
+            "runtime": {"provider": "qwen", "product": "qwen-code", "version": "0.24.6"},
             "configured_model": {"id": "qwen3-coder-plus"},
             "active_model": {"id": "qwen3-coder-next"},
             "role_model_identity_lock": True,
@@ -194,7 +209,7 @@ class ValidatePluginTest(unittest.TestCase):
     def test_qwen_profile_blocks_missing_dispatch_and_continuation(self) -> None:
         result = self.run_policy(
             {
-                "runtime": {"provider": "qwen", "product": "qwen-code", "version": "0.22.2"},
+                "runtime": {"provider": "qwen", "product": "qwen-code", "version": "0.24.6"},
                 "configured_model": {"id": "qwen3-coder-plus"},
                 "active_model": {"id": "qwen3-coder-plus"},
                 "role_model_identity_lock": True,

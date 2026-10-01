@@ -68,12 +68,15 @@ capability или отсутствии совместимой пары tier+effo
 `BLOCKED_CAPABILITY`; model-name guessing, fallback и self-review не
 допускаются.
 
-### Qwen Code v0.22.2 single-model profile (Qwen single-model profile)
+### Qwen single-model profile (version-agnostic runtime)
 
-Qwen выбирается не по имени модели, а только из trusted runtime declaration:
-`runtime.provider: qwen`, `runtime.product: qwen-code` и
-`runtime.version: 0.22.2`. Документированная fixture schema дополнительно
-содержит `configured_model.id`, равный `active_model.id`,
+Qwen runtime идентифицируется по `runtime.provider: qwen` и
+`runtime.product: qwen-code`. Наблюдаемая `runtime.version` записывается в
+evidence, но не является allow-list и не ограничивает запуск конкретным
+релизом. Capability preflight проверяет фактические role capabilities для
+текущей сессии; отсутствие любой обязательной возможности блокирует dispatch.
+Документированная fixture schema дополнительно содержит
+`configured_model.id`, равный `active_model.id`,
 `role_model_identity_lock`, `fresh_named_subagent`,
 `implementer_continuation`, `reviewer_policy` и `verification_command`.
 Неполная или недоверенная декларация возвращает
@@ -94,15 +97,21 @@ verification command и дают `BLOCKED_CAPABILITY`.
 role-agents сохраняют одну
 проверенную configured model identity. Успешная fixture возвращает observed
 configuration и `usage: AVAILABLE|NOT_AVAILABLE`; отсутствие provider usage
-не заменяется оценкой токенов.
+не заменяется оценкой токенов. Версия Qwen сохраняется в runtime trace для
+диагностики, но несовпадение с предыдущим release само по себе не блокирует
+роль.
 
 До dispatch adapter также подтверждает executable verification command.
 
 Этот профиль использует `repair_policy: QWEN_CONVERGENT`. Qwen delivery
 поставляется нативным extension из корня repository: `qwen-extension.json`
-публикует тот же `finish-ticket` skill и `finish-ticket-controller` agent.
-Extension ссылается на этот единственный файл lifecycle, не дублирует его;
-короткий запуск — `/finish-ticket ticket <ID или путь>`. Codex adaptive profile
+публикует `finish-ticket` skill и `finish-ticket-controller` agent. Для Qwen
+protocol используется личный `/finish-ticket ticket <ID или путь>` из
+`~/.qwen/skills/finish-ticket/`. Guarded protocol launcher читает только этот
+`SKILL.md` и проверяет `name: finish-ticket`; extension manifest и внешние
+Qwen settings не нужны. Это file preflight, а не доказательство фактической
+runtime-регистрации Skill в CLI. Recon сохраняет отдельный extension gate.
+Codex adaptive profile
 и его numeric budget остаются без изменений.
 
 ### Guarded Qwen runtime lifecycle
@@ -110,10 +119,56 @@ Extension ссылается на этот единственный файл lif
 Native Qwen Controller допускает role dispatch только при fresh compatible
 `QWEN_SESSION_GUARD` receipt. Receipt содержит только raw-free projection:
 `receipt_type`, `receipt_version`, `launch_id`, `issued_at_utc`, `mode`,
-effective `limits`, `loop_detection` и `extension_available`. Для текущего
+effective `limits`, `loop_detection` и mode-specific capability:
+`finish_ticket_skill_available` для protocol, `extension_available` для recon.
+Для текущего
 `protocol` profile receipt старше bounded freshness window, отсутствующий или
 несовместимый по identity/mode/limits/control flags даёт
 `BLOCKED_CAPABILITY` до role dispatch.
+
+После завершения protocol launcher также сохраняет отдельное
+role_lifecycle_evidence версии proofloop.qwen-role-lifecycle.v1 внутри
+runtime projection. Host projector связывает его теми же launch_id и
+session_id_hash с terminal receipt, но не расширяет строгую схему самого
+receipt. Он сохраняет только allowlisted role names, matched tool-result
+completion, fresh-named flag и количество нераспознанных Agent dispatch;
+prompts, arguments и results не попадают в projection. COMPLETE требует
+успешные fresh named Implementer → Reviewer → Verifier dispatch; повторные
+Implementer/Reviewer допустимы для repair до Verifier. Ошибка, отсутствие
+роли, неправильный порядок, fork/resume или неизвестный Agent type дают
+BLOCKED. Это доказывает только фактический dispatch и завершение вызовов,
+не tool policy, качество результата или acceptance; последние по-прежнему
+требуют отдельных независимых evidence.
+
+Отдельно Controller может запросить raw-free role progress projection
+proofloop.qwen-role-progress.v1 (`--project-role-progress`). Если незавершённый
+fresh named role-agent накопил шесть cumulative read-only tool calls, Controller
+требует короткий progress checkpoint до следующего действия: новые проверенные
+факты и один конкретный следующий шаг при неизменных task/scope. Шесть —
+checkpoint threshold, не hard cap, не число последовательных вызовов и не
+основание завершить полезную работу; валидный checkpoint разрешает продолжение
+без сброса накопленных counters, а отсутствие проверяемого прогресса или
+изменение scope блокируют следующее действие. Роль, завершившаяся до порога,
+не блокируется задним числом. Fork/resume или неизвестный Agent type не
+считаются продуктивной ролью. Projection связывает counters только с
+наблюдаемыми в parent stream вызовами: вложенные tool calls роли в parent
+потоке не наблюдаются и попадают в conservative unattributed tally, который
+никогда не даёт checkpoint authority. Exact repeated-fingerprint detector
+остаётся немедленным terminal stop; read checkpoint его не заменяет и не
+получает исключений для mixed read/write/shell циклов. Silent failure
+классифицируется отдельно, без автоматического retry; correlation из малой
+выборки Ticket 314 (22 запуска, включая fork с нулём tool calls и одну
+отмену) не трактуется как причинность. Порог не меняет protocol ceilings
+`20 turns / 20 tool calls / 30m / depth 1`, `pilot-expanded` profile,
+Qwen settings, provider/auth, reasoning, sampling или role profile.
+
+При protocol exit без пригодного JSONL, скрытый supervisor выводит child
+stdout/stderr во временные файлы с лимитом чтения 2 MiB на поток. Adapter
+классифицирует их до удаления и сохраняет только process_output_diagnostic:
+наличие stream/JSON, форму envelope и allowlisted error category. Сырые
+сообщения и пути не публикуются; слишком большой или недоступный capture
+помечается только status. Это не заменяет обязательный полный event receipt
+и не превращает exit failure в success.
 
 Каждое runtime observation также является raw-free: session identity, turn/tool
 counters, wall-time counter, loop flag, tool fingerprint и reproducible evidence.
@@ -155,7 +210,15 @@ checkpoint, нерастущий sequence, regression, scope drift, design gap �
 только fingerprints и identities: prompt, секреты, paths, diff text, commands и
 raw output туда не копируются. Эта политика не меняет настройки пользователя
 Qwen, provider, reasoning или sampling.
-Protocol session ceilings остаются `20 turns / 20 tool calls / 30m / depth 1`.
+Обычный protocol сохраняет ceilings `20 turns / 20 tool calls / 30m / depth 1`.
+Для одного owner-authorized disposable Ticket 314 pilot launcher допускает
+отдельный `pilot-expanded` receipt/profile: `20 turns / 40 tool calls / 30m /
+depth 1`. Профиль доступен только в protocol mode из checkout под `.scratch`
+для `qwen-protocol-pilot-ticket.md` с точными test-only scope markers; gate
+проверяется до CLI capability probe. Он не меняет model setting
+`maxToolCallsPerTurn`, пользовательские settings или обычный профиль. Guard
+receipt использует version 2 и явно содержит `budget_profile`; несовпадение
+профиля/receipt блокирует role dispatch.
 
 Это trusted Controller input contract: runtime policy проверяет форму, hashes,
 freshness, identity binding и append-only ledger, но не перепроверяет внешний
@@ -170,27 +233,54 @@ projection, после чего вызывает Ticket 22 policy. Только
 `QWEN_RUNTIME_GUARD_READY` разрешает один новый protocol launch;
 checkpoint/evidence IDs перед этим отмечаются как consumed.
 
-Protocol invocation добавляет временный `--json-file` sidecar, который может
-содержать весь transcript. Supervisor читает только полные JSONL records,
-удаляет sidecar после raw-free projection и напрямую запускает только распознанную
-Node-форму `qwen.cmd`; неизвестный `.cmd` fail-closed. Host-owned terminal
+Protocol передаёт личный `/finish-ticket` через
+`--output-format stream-json --prompt "/finish-ticket ticket N"`. Временный
+stdout stream может содержать весь transcript; supervisor читает только полные
+JSONL records и удаляет stream после raw-free projection. Launcher напрямую
+запускает только распознанную Node-форму `qwen.cmd`; неизвестный `.cmd`
+fail-closed. Host-owned terminal
 receipt связывает launch/session, host process observation, counters и event
 coverage. Продолжение возможно только после `HOST_WALL_LIMIT` или
 `HOST_TOOL_LIMIT`, подтверждённых действием supervisor до process exit,
-`event_coverage=COMPLETE`, post-stop `session_end`, закрытым process tree, валидным
+`event_coverage=COMPLETE`, post-stop terminal event (`type=result` либо
+поддерживаемый `session_end`), закрытым process tree, валидным
 checkpoint и `HOST_CLEAR` от `exact_tool_interaction_cycle_v1`.
+Начальный system event headless stream должен иметь subtype `init` или
+`session_start` и валидный session id; неизвестные формы не становятся
+bootstrap. Assistant content допускает `text`, `tool_use` и `thinking`;
+последний принимается только со строковым `thinking` и полностью исключается
+из raw-free receipts, role projection и fingerprints. Неизвестный тип блока и
+malformed content остаются fail-closed. Этот контракт описывает форму событий,
+не фиксируя версию Qwen или reasoning setting.
 В protocol mode capability `--help` preflight использует тот же проверенный
 direct-Node adapter: неизвестный `.cmd` отклоняется до исполнения, включая
 раннюю capability-проверку.
+
+D053 ранее требовал `--prompt-interactive`; после live failure с redirected
+console streams этот выбор заменён D059. Актуальный contract использует headless
+`--prompt` и `--output-format stream-json`; invocation registry, capability
+preflight, fail-closed guard policy и CLI bridge проверяют оба output markers.
+Общий `capability_smoke` также требует session ceilings. Skill preflight
+проверяет личный `SKILL.md` с `name: finish-ticket`. Это не меняет budgets,
+Qwen settings, provider/auth, sampling, reasoning, role profile или другие
+authority gates. Terminal projector принимает начальный system subtype `init`
+или `session_start` с валидным session id. Contract не привязан к версии CLI;
+локальные fixtures не
+являются live role-lifecycle proof. Актуальное решение: D059 в
+`docs/decisions.md`.
+
+Protocol mode не устанавливает `QWEN_CODE_MAX_OUTPUT_TOKENS`: сохраняются
+настроенный reasoning и модельный output budget Qwen. Session/tool/time/depth
+ceilings остаются отдельными workflow guards. См. D061 в `docs/decisions.md`.
 
 `HOST_CLEAR` означает только, что версионный detector не нашёл три соседних
 идентичных завершённых interaction cycles в полном потоке; это не `NATIVE_CLEAR`
 и не гарантия отсутствия любого возможного цикла. `NORMAL_EXIT`, `DETECTED`,
 `UNKNOWN`, `INCOMPLETE`, гонка terminal event/stop и неизвестная JSONL schema
 не открывают continuation. `session_end`, counters и exit code по отдельности
-не являются budget-stop evidence. Qwen settings/provider/credentials/sampling/
-reasoning/role profile/loop-detection configuration и native protocol argv не
-меняются.
+не являются budget-stop evidence. D051 не меняет Qwen
+settings/provider/credentials/sampling/reasoning/role profile/loop-detection
+configuration; mode-specific protocol argv отдельно уточнён решением D053.
 
 Локальная реализация D051 прошла fake-process/evidence и lifecycle gates;
 локальные fixtures не являются live Qwen proof. Native Qwen Code `v0.24.4`
@@ -206,6 +296,24 @@ counters или отсутствия событий. После dispatch parent 
 versioned raw-free `QWEN_TERMINAL_OUTCOME` и при nonzero/unsupported outcome;
 этот parent receipt может явно показывать, что Qwen runtime evidence/counters
 недоступны, и не подменяет его или success.
+
+Для отдельной bounded protocol diagnosis оператор может явно передать
+`-ShowOutput`. Только в этом режиме stdout/stderr Qwen child отображаются в
+консоли оператора; по умолчанию они подавлены. Raw строки не копируются в
+projection или receipt. `QWEN_TERMINAL_OUTCOME` v5 хранит только allowlisted
+outer/CLI/supervisor stages, process state/exit code, event-file state/byte
+count и `VISIBLE`/`SUPPRESSED`. При fail-closed projection receipt может также
+содержать `partial_observation`: число полностью распознанных JSONL records,
+assistant turns, tool dispatch/results/errors, Agent dispatches и факт
+наблюдения `type=result`. Оборванная или malformed строка не считается; raw
+records, tool names/inputs/results и transcript не сохраняются. Эти counters
+диагностические: они не заменяют полный `event_coverage`, terminal event,
+loop/budget evidence и никогда не разрешают continuation, role dispatch или
+acceptance. Отдельный `runtime_projection_reason` сохраняет только точный
+allowlisted code host projector при `BLOCKED_CAPABILITY`; он не меняет общий
+status/reason и не содержит raw text. `cli_stage` фиксирует только конечную
+фазу launcher bridge и не содержит exception details. После failure повторный
+запуск требует отдельного разрешения.
 
 Если sidecar содержит terminal `type=result` с `is_error=true`, projector
 возвращает fail-closed `QWEN_JSON_ERROR_RESULT` и только raw-free поля:
@@ -228,7 +336,11 @@ Windows Credential Manager и задаёт `OPENAI_API_KEY` только про�
 пользовательском environment, receipt, ledger или log. Protocol не
 переопределяет endpoint/model;
 `recon` дополнительно передаёт свои configured endpoint/model как временные
-process variables.
+process variables. Protocol CLI consumer запускается отдельным экземпляром
+текущего PowerShell host; secret не передаётся в argv. Проверенный continuation
+packet передаётся между launcher слоями через временный UTF-8 файл и удаляется
+после dispatch. Его максимальный размер — `14,000 UTF-8 bytes` из-за Windows
+argv ограничения, не из-за бюджета модели; см. D064–D065.
 
 Перед child dispatch adapter вызывает общий pure
 `scripts/qwen_guard_policy.py` с projected settings, capabilities, worktree и

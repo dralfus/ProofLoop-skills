@@ -44,7 +44,8 @@ evidence, любой mismatch, loop/repeated fingerprint, неизвестный
 reason или ошибка raw-free projection дают fail-closed результат без вызова
 Qwen. Продолжение создаёт свежие launch/evidence identities; предыдущие
 counters и ledger events не удаляются.
-5. Continuation prompt использует тот же canonical `/finish-ticket ticket <id>`
+5. Continuation prompt использует тот же personal
+   `/finish-ticket ticket <id>` route, скорректированный решением D055,
 и добавляет Controller-verified progress context как текст prompt, не как часть
 raw-free runtime receipt. Ticket requirements и scope не меняются.
 

@@ -51,6 +51,29 @@ class QwenTerminalProjectionTest(unittest.TestCase):
         self.assertEqual(result["diagnostic"]["envelope_error_message_category"], "auth_or_forbidden")
         self.assertNotIn("403 Forbidden", json.dumps(result))
 
+    def test_projects_plain_text_auth_failure_without_raw_message(self) -> None:
+        result = QWEN_TERMINAL_PROJECTION.project_failure(
+            "",
+            "HTTP 403 Forbidden https://private.example/v1 secret-token",
+        )
+
+        self.assertEqual(result["reason"], "QWEN_COMMAND_FAILED")
+        self.assertTrue(result["diagnostic"]["stderr_present"])
+        self.assertTrue(result["diagnostic"]["error_message_present"])
+        self.assertEqual(result["diagnostic"]["error_message_category"], "auth_or_forbidden")
+        rendered = json.dumps(result)
+        for forbidden in ("private.example", "secret-token", "403 Forbidden"):
+            self.assertNotIn(forbidden, rendered)
+
+    def test_generic_api_key_or_token_text_is_not_classified_as_auth_failure(self) -> None:
+        result = QWEN_TERMINAL_PROJECTION.project_failure(
+            "",
+            "Documentation mentions an API key and access token in a usage example.",
+        )
+
+        self.assertEqual(result["diagnostic"]["error_message_category"], "other")
+        self.assertTrue(result["diagnostic"]["error_message_present"])
+
     def test_extracts_terminal_structured_result_from_event_array(self) -> None:
         manifest = {"successful_recon": True, "files": ["tests/a.py"]}
 

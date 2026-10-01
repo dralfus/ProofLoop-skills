@@ -14,6 +14,12 @@ MAX_TEXT_RESULT_BYTES = 65_536
 MAX_ELAPSED_MS = 24 * 60 * 60 * 1000
 LOOP_DETECTOR_VERSION = "exact_tool_interaction_cycle_v1"
 RECEIPT_SCHEMA = "proofloop.qwen-terminal-receipt.v1"
+ROLE_LIFECYCLE_SCHEMA = "proofloop.qwen-role-lifecycle.v1"
+_ROLE_LIFECYCLE_ALLOWLIST = (
+    "finish-ticket-implementer",
+    "finish-ticket-reviewer",
+    "finish-ticket-verifier",
+)
 _OBSERVATION_FIELDS = frozenset(
     {
         "launch_id",
@@ -39,7 +45,7 @@ _EVENT_TYPES = {
     "stream_event",
     "result",
 }
-_BLOCK_TYPES = {"text", "tool_use", "tool_result"}
+_BLOCK_TYPES = {"text", "thinking", "tool_use", "tool_result"}
 _STOP_REASONS = {"HOST_WALL_LIMIT", "HOST_TOOL_LIMIT"}
 
 
@@ -200,6 +206,52 @@ def _decode_event_lines(event_jsonl: str) -> list[tuple[int, dict[str, Any]]]:
     return decoded
 
 
+def _decode_complete_event_prefix(event_jsonl: str) -> list[tuple[int, dict[str, Any]]]:
+    """Decode only complete, valid JSONL records before the first bad/truncated record."""
+    if not isinstance(event_jsonl, str):
+        return []
+    try:
+        encoded = event_jsonl.encode("utf-8", errors="strict")
+    except UnicodeError:
+        return []
+    if not encoded or len(encoded) > MAX_EVENT_BYTES:
+        return []
+
+    def reject_constant(_: str) -> None:
+        raise ValueError("non-finite number")
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate key")
+            value[key] = item
+        return value
+
+    decoded: list[tuple[int, dict[str, Any]]] = []
+    offset = 0
+    lines = encoded.split(b"\n")
+    for line in lines[:-1]:
+        start = offset
+        offset += len(line) + 1
+        if line.endswith(b"\r"):
+            line = line[:-1]
+        if not line or len(line) > MAX_EVENT_LINE_BYTES:
+            break
+        try:
+            event = json.loads(
+                line.decode("utf-8", errors="strict"),
+                parse_constant=reject_constant,
+                object_pairs_hook=unique_object,
+            )
+        except (UnicodeError, ValueError, json.JSONDecodeError, RecursionError):
+            break
+        if not isinstance(event, dict):
+            break
+        decoded.append((start, event))
+    return decoded
+
+
 def _text_result_size(value: object) -> int:
     try:
         if isinstance(value, str):
@@ -263,12 +315,14 @@ def _interaction_cycles(
         pending = {}
 
     for offset, event in events:
+        if session_end_offsets:
+            raise _ProjectionError("SESSION_END_NOT_FINAL", incomplete=True)
         event_type = event.get("type")
         if not isinstance(event_type, str) or event_type not in _EVENT_TYPES:
             raise _ProjectionError("EVENT_SCHEMA_UNKNOWN")
         if event_type == "system":
             subtype = event.get("subtype")
-            if subtype == "session_start":
+            if subtype in {"session_start", "init"}:
                 if session_id is not None or not isinstance(event.get("session_id"), str) or not event["session_id"]:
                     raise _ProjectionError("SESSION_ID_INVALID")
                 try:
@@ -286,6 +340,22 @@ def _interaction_cycles(
 
         if session_id is None:
             raise _ProjectionError("SESSION_START_MISSING", incomplete=True)
+
+        if event_type == "result":
+            result_session_id = event.get("session_id")
+            result_subtype = event.get("subtype")
+            result_is_error = event.get("is_error")
+            if (
+                result_session_id != session_id
+                or not isinstance(result_subtype, str)
+                or not result_subtype
+                or (result_is_error is not None and type(result_is_error) is not bool)
+            ):
+                raise _ProjectionError("TERMINAL_RESULT_INVALID", incomplete=True)
+            if pending or assistant_content is not None:
+                raise _ProjectionError("TOOL_RESULT_MISSING", incomplete=True)
+            session_end_offsets.append(offset)
+            continue
 
         if event_type == "assistant":
             message = event.get("message")
@@ -318,6 +388,12 @@ def _interaction_cycles(
                     if not isinstance(text, str):
                         raise _ProjectionError("EVENT_SCHEMA_UNKNOWN")
                     normalized.append({"type": "text", "text": text})
+                elif block_type == "thinking":
+                    if not isinstance(block.get("thinking"), str):
+                        raise _ProjectionError("EVENT_SCHEMA_UNKNOWN")
+                    # Reasoning is valid assistant content but never part of
+                    # public receipts or repeated-tool fingerprints.
+                    continue
                 elif block_type == "tool_use":
                     identity = block.get("id")
                     name = block.get("name")
@@ -401,14 +477,11 @@ def _interaction_cycles(
 
         # Other documented event classes do not alter the tool stream, but unknown shapes
         # cannot establish that a repeated interaction was adjacent and complete.
-        if event_type in {"control_request", "control_response", "stream_event", "result"}:
+        if event_type in {"control_request", "control_response", "stream_event"}:
             payload = event.get("request") or event.get("response") or event.get("data") or event.get("result")
             if payload is None:
                 raise _ProjectionError("EVENT_SCHEMA_UNKNOWN")
-            if event_type in {"control_request", "control_response", "stream_event"}:
-                loop_unknown = True
-            else:
-                cycles = []
+            loop_unknown = True
 
     if session_id is None:
         raise _ProjectionError("SESSION_START_MISSING", incomplete=True)
@@ -416,9 +489,66 @@ def _interaction_cycles(
         raise _ProjectionError("TOOL_RESULT_MISSING", incomplete=True)
     if len(session_end_offsets) != 1:
         raise _ProjectionError("SESSION_END_MISSING", incomplete=True)
-    if events[-1][1].get("type") != "system" or events[-1][1].get("subtype") != "session_end":
+    terminal_event = events[-1][1]
+    if not (
+        (terminal_event.get("type") == "system" and terminal_event.get("subtype") == "session_end")
+        or terminal_event.get("type") == "result"
+    ):
         raise _ProjectionError("SESSION_END_NOT_FINAL", incomplete=True)
     return session_id, turns, tool_calls, session_end_offsets[0], loop_unknown, cycles[-3:]
+
+
+def _partial_observation(events: list[tuple[int, dict[str, Any]]]) -> dict[str, object]:
+    """Count only typed event facts; this is diagnostic and never terminal proof."""
+    assistant_turns = 0
+    tool_dispatches = 0
+    tool_results = 0
+    tool_errors = 0
+    agent_dispatches = 0
+    terminal_result_seen = False
+
+    for _, event in events:
+        event_type = event.get("type")
+        if event_type == "assistant":
+            message = event.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(message, dict) or message.get("role") != "assistant" or not isinstance(content, list):
+                continue
+            assistant_turns += 1
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                name = block.get("name")
+                if not isinstance(name, str) or not name:
+                    continue
+                tool_dispatches += 1
+                if name.casefold() == "agent":
+                    agent_dispatches += 1
+        elif event_type == "user":
+            message = event.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(message, dict) or message.get("role") != "user" or not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_result":
+                    continue
+                is_error = block.get("is_error", False)
+                if type(is_error) is not bool:
+                    continue
+                tool_results += 1
+                tool_errors += int(is_error)
+        elif event_type == "result":
+            terminal_result_seen = True
+
+    return {
+        "event_lines_observed": len(events),
+        "assistant_turns_observed": assistant_turns,
+        "tool_dispatches_observed": tool_dispatches,
+        "tool_results_observed": tool_results,
+        "tool_errors_observed": tool_errors,
+        "agent_dispatches_observed": agent_dispatches,
+        "terminal_result_seen": terminal_result_seen,
+    }
 
 
 def _project_terminal_receipt(
@@ -443,15 +573,18 @@ def _project_terminal_receipt(
             loop_status="UNKNOWN",
             budget_stop=False,
         )
+    decoded: list[tuple[int, dict[str, Any]]] | None = None
+    observation_validated = False
     try:
         observation = _validate_observation(process_observation, expected_launch_id)
+        observation_validated = True
         decoded = _decode_event_lines(event_jsonl)
         session_id, turns, tool_calls, session_end_offset, loop_unknown, cycle_hashes = _interaction_cycles(decoded)
     except _ProjectionError as error:
         observation = process_observation if isinstance(process_observation, dict) else {}
         elapsed_ms = observation.get("elapsed_ms", 0)
         exit_code = observation.get("process_exit_code")
-        return _raw_free(
+        projection = _raw_free(
             launch_id=expected_launch_id,
             status="BLOCKED",
             reason=error.reason,
@@ -465,6 +598,11 @@ def _project_terminal_receipt(
             loop_status="UNKNOWN",
             budget_stop=False,
         )
+        if decoded is None and observation_validated:
+            decoded = _decode_complete_event_prefix(event_jsonl)
+        if decoded is not None:
+            projection["partial_observation"] = _partial_observation(decoded)
+        return projection
 
     elapsed_ms = observation["elapsed_ms"]
     exit_code = observation["process_exit_code"]
@@ -629,3 +767,156 @@ def project_terminal_receipt(
             loop_status="UNKNOWN",
             budget_stop=False,
         )
+
+
+def _project_role_lifecycle(
+    event_jsonl: str,
+    *,
+    expected_launch_id: str,
+) -> dict[str, Any]:
+    safe_launch_id = (
+        expected_launch_id
+        if isinstance(expected_launch_id, str)
+        and re.fullmatch(r"[0-9a-f]{32}", expected_launch_id) is not None
+        else "0" * 32
+    )
+
+    def result(
+        status: str,
+        reason: str,
+        calls: list[dict[str, object]] | None = None,
+        *,
+        unclassified: int = 0,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "schema_version": ROLE_LIFECYCLE_SCHEMA,
+            "status": status,
+            "reason": reason,
+            "launch_id": safe_launch_id,
+            "session_id_hash": hashlib.sha256(session_id.encode("utf-8")).hexdigest() if session_id else None,
+            "role_calls": calls or [],
+            "unclassified_agent_calls": unclassified,
+        }
+
+    if safe_launch_id == "0" * 32:
+        return result("BLOCKED", "LAUNCH_ID_INVALID")
+    try:
+        decoded = _decode_event_lines(event_jsonl)
+        session_id, _, _, _, _, _ = _interaction_cycles(decoded)
+        calls: list[dict[str, object]] = []
+        pending_roles: dict[str, dict[str, object]] = {}
+        unclassified = 0
+
+        for _, event in decoded:
+            event_type = event.get("type")
+            if event_type == "assistant":
+                message = event.get("message")
+                assert isinstance(message, dict)
+                content = message.get("content")
+                assert isinstance(content, list)
+                for block in content:
+                    if (
+                        not isinstance(block, dict)
+                        or block.get("type") != "tool_use"
+                        or not isinstance(block.get("name"), str)
+                        or block["name"].casefold() != "agent"
+                    ):
+                        continue
+                    identity = block.get("id")
+                    call_input = block.get("input")
+                    assert isinstance(identity, str) and isinstance(call_input, dict)
+                    role_name = call_input.get("subagent_type")
+                    if role_name not in _ROLE_LIFECYCLE_ALLOWLIST:
+                        unclassified += 1
+                        continue
+                    fresh_named = (
+                        call_input.get("resume_agent_id") in (None, "")
+                        and call_input.get("fork") is not True
+                        and not any(
+                            call_input.get(field) not in (None, "", False, [])
+                            for field in ("fork_turns", "fork_tools", "fork_profile")
+                        )
+                    )
+                    role_call = {
+                        "role": role_name,
+                        "completion": "PENDING",
+                        "fresh_named": fresh_named,
+                    }
+                    calls.append(role_call)
+                    pending_roles[identity] = role_call
+            elif event_type == "user":
+                message = event.get("message")
+                assert isinstance(message, dict)
+                content = message.get("content")
+                assert isinstance(content, list)
+                for block in content:
+                    if not isinstance(block, dict) or block.get("type") != "tool_result":
+                        continue
+                    role_call = pending_roles.get(block.get("tool_use_id"))
+                    if role_call is not None:
+                        role_call["completion"] = (
+                            "ERROR" if block.get("is_error", False) else "COMPLETED"
+                        )
+
+        if unclassified:
+            return result(
+                "BLOCKED", "ROLE_AGENT_UNCLASSIFIED", calls,
+                unclassified=unclassified, session_id=session_id,
+            )
+        if not calls:
+            return result("BLOCKED", "ROLE_CALL_MISSING", session_id=session_id)
+        if any(not any(call["role"] == role for call in calls) for role in _ROLE_LIFECYCLE_ALLOWLIST):
+            return result("BLOCKED", "ROLE_CALL_MISSING", calls, session_id=session_id)
+        if any(call["completion"] == "ERROR" for call in calls):
+            return result("BLOCKED", "ROLE_CALL_FAILED", calls, session_id=session_id)
+        if any(call["completion"] != "COMPLETED" for call in calls):
+            return result("BLOCKED", "ROLE_CALL_INCOMPLETE", calls, session_id=session_id)
+        if not all(call["fresh_named"] for call in calls):
+            return result("BLOCKED", "ROLE_NOT_FRESH_NAMED", calls, session_id=session_id)
+
+        implementer_positions = [
+            index for index, call in enumerate(calls)
+            if call["role"] == _ROLE_LIFECYCLE_ALLOWLIST[0]
+        ]
+        reviewer_positions = [
+            index for index, call in enumerate(calls)
+            if call["role"] == _ROLE_LIFECYCLE_ALLOWLIST[1]
+        ]
+        verifier_positions = [
+            index for index, call in enumerate(calls)
+            if call["role"] == _ROLE_LIFECYCLE_ALLOWLIST[2]
+        ]
+        ordered = (
+            bool(implementer_positions)
+            and bool(reviewer_positions)
+            and bool(verifier_positions)
+            and any(
+                implementer < reviewer < verifier_positions[-1]
+                for implementer in implementer_positions
+                for reviewer in reviewer_positions
+            )
+            and all(
+                call["role"] == _ROLE_LIFECYCLE_ALLOWLIST[2]
+                for call in calls[verifier_positions[-1] + 1:]
+            )
+        )
+        if not ordered:
+            return result("BLOCKED", "ROLE_ORDER_INVALID", calls, session_id=session_id)
+        return result("COMPLETE", "ROLE_LIFECYCLE_COMPLETE", calls, session_id=session_id)
+    except _ProjectionError as error:
+        allowed_reasons = {
+            "EVENT_STREAM_INVALID", "EVENT_STREAM_INCOMPLETE", "EVENT_SCHEMA_UNKNOWN",
+            "SESSION_START_MISSING", "SESSION_END_MISSING", "SESSION_END_NOT_FINAL",
+            "TOOL_RESULT_MISSING", "TOOL_RESULT_UNPAIRED", "TOOL_USE_INVALID",
+            "MESSAGE_ID_INVALID", "SESSION_ID_INVALID",
+        }
+        reason = error.reason if error.reason in allowed_reasons else "EVENT_SCHEMA_UNKNOWN"
+        return result("BLOCKED", reason)
+    except Exception:
+        return result("BLOCKED", "PROJECTION_FAILURE")
+
+
+def project_role_lifecycle(event_jsonl: str, *, expected_launch_id: str) -> dict[str, Any]:
+    """Project only allowlisted fresh named role-call metadata from a complete session."""
+    return _project_role_lifecycle(event_jsonl, expected_launch_id=expected_launch_id)

@@ -44,6 +44,24 @@ def create_clean_git_worktree(root: Path) -> None:
     )
 
 
+def write_proofloop_extension_fixture(root: Path) -> None:
+    (root / "qwen-extension.json").write_text(
+        json.dumps({"name": "proofloop-skills", "skills": "skills"}), encoding="utf-8"
+    )
+    skill_directory = root / "skills" / "finish-ticket"
+    skill_directory.mkdir(parents=True, exist_ok=True)
+    (skill_directory / "SKILL.md").write_text(
+        "---\nname: finish-ticket\ndescription: fixture\n---\n", encoding="utf-8"
+    )
+
+
+def write_personal_skill_fixture(path: Path, name: str = "finish-ticket") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"---\nname: {name}\ndescription: fixture\n---\n", encoding="utf-8"
+    )
+
+
 def write_qwen_node_shim(root: Path, entrypoint_source: str) -> Path:
     entrypoint = root / "node_modules" / "@qwen-code" / "qwen-code" / "cli-entry.js"
     entrypoint.parent.mkdir(parents=True)
@@ -78,11 +96,30 @@ def write_qwen_node_shim(root: Path, entrypoint_source: str) -> Path:
 
 
 class QwenRuntimeGuardTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._profile_fixture = tempfile.TemporaryDirectory()
+        cls._previous_userprofile = os.environ.get("USERPROFILE")
+        os.environ["USERPROFILE"] = cls._profile_fixture.name
+        cls.personal_skill_path = (
+            Path(cls._profile_fixture.name) / ".qwen" / "skills" / "finish-ticket" / "SKILL.md"
+        )
+        write_personal_skill_fixture(cls.personal_skill_path)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if cls._previous_userprofile is None:
+            os.environ.pop("USERPROFILE", None)
+        else:
+            os.environ["USERPROFILE"] = cls._previous_userprofile
+        cls._profile_fixture.cleanup()
+
     def test_launcher_default_settings_path_uses_userprofile_environment(self) -> None:
         source = LAUNCHER.read_text(encoding="utf-8")
 
         self.assertIn("Join-Path $env:USERPROFILE '.qwen\\settings.json'", source)
         self.assertNotIn("GetFolderPath([Environment+SpecialFolder]::UserProfile)", source)
+        self.assertIn("Join-Path $env:USERPROFILE '.qwen\\skills\\finish-ticket\\SKILL.md'", source)
 
     def test_protocol_preflight_blocks_unrecognized_qwen_cmd_before_execution(self) -> None:
         self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
@@ -91,9 +128,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             settings_path = root / "settings.json"
             extension_root = root / "proofloop-skills"
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             settings_path.write_text(
                 json.dumps(
                     {
@@ -132,8 +167,111 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             self.assertIn("QWEN_CLI_UNAVAILABLE", result.stdout + result.stderr)
             self.assertFalse(marker.exists(), "unknown batch wrapper ran during capability preflight")
 
+    def test_protocol_preflight_requires_personal_finish_ticket_skill_before_cli_probe(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            personal_skill = root / ".qwen" / "skills" / "finish-ticket" / "SKILL.md"
+            result = subprocess.run(
+                [
+                    PWSH, "-NoProfile", "-File", str(LAUNCHER),
+                    "-Ticket", "314", "-Mode", "protocol",
+                    "-SettingsPath", str(root / "missing-settings.json"),
+                    "-ReceiptDirectory", str(root / "receipts"),
+                    "-QwenCommand", str(root / "missing-qwen.cmd"),
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                env={**os.environ, "USERPROFILE": str(root)},
+            )
+
+            self.assertEqual(result.returncode, 3, result.stderr + result.stdout)
+            projection = json.loads(result.stdout.strip().splitlines()[-1])
+            self.assertEqual(projection["status"], "BLOCKED_CAPABILITY")
+            self.assertEqual(projection["terminal_reason"], "PROOFLOOP_SKILL_MISSING")
+
+    def test_protocol_preflight_rejects_wrong_personal_skill_name_before_cli_probe(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            personal_skill = root / ".qwen" / "skills" / "finish-ticket" / "SKILL.md"
+            write_personal_skill_fixture(personal_skill, name="Finish-Ticket")
+            result = subprocess.run(
+                [
+                    PWSH, "-NoProfile", "-File", str(LAUNCHER),
+                    "-Ticket", "314", "-Mode", "protocol",
+                    "-SettingsPath", str(root / "missing-settings.json"),
+                    "-ReceiptDirectory", str(root / "receipts"),
+                    "-QwenCommand", str(root / "missing-qwen.cmd"),
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                env={**os.environ, "USERPROFILE": str(root)},
+            )
+
+            self.assertEqual(result.returncode, 3, result.stderr + result.stdout)
+            projection = json.loads(result.stdout.strip().splitlines()[-1])
+            self.assertEqual(projection["status"], "BLOCKED_CAPABILITY")
+            self.assertEqual(projection["terminal_reason"], "PROOFLOOP_SKILL_INVALID")
+
+    def test_protocol_uses_personal_skill_without_extension_manifest(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            personal_skill = root / ".qwen" / "skills" / "finish-ticket" / "SKILL.md"
+            write_personal_skill_fixture(personal_skill)
+            result = subprocess.run(
+                [
+                    PWSH, "-NoProfile", "-File", str(LAUNCHER),
+                    "-Ticket", "314", "-Mode", "protocol",
+                    "-SettingsPath", str(root / "missing-settings.json"),
+                    "-ReceiptDirectory", str(root / "receipts"),
+                    "-QwenCommand", str(root / "missing-qwen.cmd"),
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                env={**os.environ, "USERPROFILE": str(root)},
+            )
+
+            self.assertEqual(result.returncode, 3, result.stderr + result.stdout)
+            projection = json.loads(result.stdout.strip().splitlines()[-1])
+            self.assertEqual(projection["status"], "BLOCKED_CAPABILITY")
+            self.assertEqual(projection["terminal_reason"], "QWEN_CLI_UNAVAILABLE")
+
+    def test_protocol_preflight_rejects_invalid_personal_skill_frontmatter_before_cli_probe(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            personal_skill = root / ".qwen" / "skills" / "finish-ticket" / "SKILL.md"
+            personal_skill.parent.mkdir(parents=True)
+            personal_skill.write_text("not a skill frontmatter\n", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    PWSH, "-NoProfile", "-File", str(LAUNCHER),
+                    "-Ticket", "314", "-Mode", "protocol",
+                    "-SettingsPath", str(root / "missing-settings.json"),
+                    "-ReceiptDirectory", str(root / "receipts"),
+                    "-QwenCommand", str(root / "missing-qwen.cmd"),
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                env={**os.environ, "USERPROFILE": str(root)},
+            )
+
+            self.assertEqual(result.returncode, 3, result.stderr + result.stdout)
+            projection = json.loads(result.stdout.strip().splitlines()[-1])
+            self.assertEqual(projection["status"], "BLOCKED_CAPABILITY")
+            self.assertEqual(projection["terminal_reason"], "PROOFLOOP_SKILL_INVALID")
+
     def test_protocol_injects_process_scoped_credential_manager_key(self) -> None:
         self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
+        credential_target = os.environ.get("PROOFLOOP_QWEN_TEST_CREDENTIAL_TARGET")
+        if not credential_target:
+            self.skipTest("Set PROOFLOOP_QWEN_TEST_CREDENTIAL_TARGET to opt into the real Credential Manager bridge test")
         if not (shutil.which("node.exe") or shutil.which("node")):
             self.skipTest("Node.js is required to exercise the recognized Qwen cmd shim")
 
@@ -142,9 +280,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             settings_path = root / "settings.json"
             extension_root = root / "proofloop-skills"
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             settings_path.write_text(
                 json.dumps(
                     {
@@ -166,7 +302,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             python_shim = python_shim_directory / "python.cmd"
             python_shim.write_text(
                 '@echo off\r\n'
-                'if "%OPENAI_API_KEY%"=="fixture-only-secret" (>>"%QWEN_FAKE_PYTHON_AUTH%" echo leaked) else (>>"%QWEN_FAKE_PYTHON_AUTH%" echo safe)\r\n'
+                'if "%OPENAI_API_KEY%"=="existing-process-value" (>>"%QWEN_FAKE_PYTHON_AUTH%" echo safe) else (>>"%QWEN_FAKE_PYTHON_AUTH%" echo leaked)\r\n'
                 '"%QWEN_REAL_PYTHON%" %*\r\n'
                 'exit /b %errorlevel%\r\n',
                 encoding="utf-8",
@@ -175,26 +311,20 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 root,
                 'const fs = require("node:fs");\n'
                 'const args = process.argv.slice(2);\n'
-                'if (args.length === 1 && args[0] === "--help") { console.log("--prompt --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --json-file"); process.exit(0); }\n'
-                'fs.writeFileSync(process.env.QWEN_FAKE_AUTH_OBSERVED, String(process.env.OPENAI_API_KEY === "fixture-only-secret"));\n'
-                'const eventPath = args[args.indexOf("--json-file") + 1];\n'
-                'const events = [{type:"system",subtype:"session_start",session_id:"fixture-session"},{type:"assistant",message:{id:"turn-1",role:"assistant",content:[]}},{type:"system",subtype:"session_end",data:{reason:"prompt_input_exit"}}];\n'
-                'fs.writeFileSync(eventPath, events.map(event => JSON.stringify(event)).join("\\n") + "\\n");\n',
+                'if (args.length === 1 && args[0] === "--help") { console.log("--prompt --output-format stream-json --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth"); process.exit(0); }\n'
+                'fs.writeFileSync(process.env.QWEN_FAKE_AUTH_OBSERVED, String(typeof process.env.OPENAI_API_KEY === "string" && process.env.OPENAI_API_KEY.length > 0));\n'
+                'const roles = ["finish-ticket-implementer", "finish-ticket-reviewer", "finish-ticket-verifier"];\n'
+                'const events = [{type:"system",subtype:"session_start",session_id:"fixture-session"}];\n'
+                'roles.forEach((role, index) => { const toolId = "role-tool-" + index; events.push({type:"assistant",message:{id:"role-call-" + index,role:"assistant",content:[{type:"tool_use",id:toolId,name:index === 1 ? "agent" : "Agent",input:{subagent_type:role,prompt:"private role prompt"}}]}}); events.push({type:"user",message:{role:"user",content:[{type:"tool_result",tool_use_id:toolId,content:"private role result"}]}}); });\n'
+                'events.push({type:"result",subtype:"success",session_id:"fixture-session",is_error:false});\n'
+                'events.forEach(event => console.log(JSON.stringify(event)));\n',
             )
             wrapper = root / "launch.ps1"
             wrapper.write_text(
-                "Add-Type -TypeDefinition @'\n"
-                "namespace ProofLoop { public static class QwenCredentialNative {\n"
-                "  public static string ReadGenericSecret(string target) {\n"
-                "    if (target != \"ProofLoop/TestCredential\") throw new System.InvalidOperationException(\"fixture target mismatch\");\n"
-                "    return \"fixture-only-secret\";\n"
-                "  }\n"
-                "} }\n"
-                "'@\n"
                 "& $env:QWEN_TEST_LAUNCHER -Ticket 'qwen-protocol-pilot-ticket.md' -Mode protocol `\n"
                 "  -SettingsPath $env:QWEN_TEST_SETTINGS -ExtensionRoot $env:QWEN_TEST_EXTENSION `\n"
                 "  -ReceiptDirectory $env:QWEN_TEST_RECEIPTS -QwenCommand $env:QWEN_TEST_COMMAND `\n"
-                "  -CredentialTarget 'ProofLoop/TestCredential'\n"
+                "  -CredentialTarget $env:PROOFLOOP_QWEN_TEST_CREDENTIAL_TARGET\n"
                 "[IO.File]::WriteAllText($env:QWEN_FAKE_PARENT_RESTORE, [string]([Environment]::GetEnvironmentVariable('OPENAI_API_KEY', 'Process') -ceq 'existing-process-value'))\n",
                 encoding="utf-8",
             )
@@ -210,6 +340,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                     "QWEN_TEST_EXTENSION": str(extension_root),
                     "QWEN_TEST_RECEIPTS": str(root / "receipts"),
                     "QWEN_TEST_COMMAND": str(fake_qwen),
+                    "PROOFLOOP_QWEN_TEST_CREDENTIAL_TARGET": credential_target,
                     "OPENAI_API_KEY": "existing-process-value",
                     "PATH": str(python_shim_directory) + os.pathsep + os.environ.get("PATH", ""),
                 }
@@ -229,7 +360,102 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             self.assertIn("safe", python_auth_observed_path.read_text(encoding="utf-8").splitlines())
             self.assertNotIn("leaked", python_auth_observed_path.read_text(encoding="utf-8").splitlines())
             self.assertEqual(parent_restore_observed_path.read_text(encoding="utf-8").lower(), "true")
-            self.assertNotIn("fixture-only-secret", result.stdout + result.stderr)
+            self.assertNotIn("OPENAI_API_KEY", result.stdout + result.stderr)
+            runtime_projections = list((root / "receipts").glob("QWEN_RUNTIME_PROJECTION-*.json"))
+            self.assertEqual(len(runtime_projections), 1)
+            runtime_projection = json.loads(runtime_projections[0].read_text(encoding="utf-8"))
+            role_evidence = runtime_projection["role_lifecycle_evidence"]
+            self.assertEqual(role_evidence["status"], "COMPLETE")
+            self.assertEqual(
+                [call["role"] for call in role_evidence["role_calls"]],
+                ["finish-ticket-implementer", "finish-ticket-reviewer", "finish-ticket-verifier"],
+            )
+            self.assertNotIn("private role prompt", json.dumps(role_evidence))
+            self.assertNotIn("private role result", json.dumps(role_evidence))
+
+    def test_pilot_expanded_budget_is_scoped_to_disposable_ticket_and_receipted(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
+        scratch = REPOSITORY_ROOT / ".scratch"
+        scratch.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="qwen-expanded-budget-test-", dir=scratch) as temporary_directory:
+            root = Path(temporary_directory)
+            (root / ".git").mkdir()
+            (root / "qwen-protocol-pilot-ticket.md").write_text(
+                "# Ticket 314 disposable Qwen implementation pilot\n"
+                "This is a fresh owner-authorized experiment.\n"
+                "It is a test-only slice related to Ticket 314.\n"
+                "test_patch_candidate_rejects_changed_lines_over_200\n"
+                "Do not commit, transfer, broaden scope.\n",
+                encoding="utf-8",
+            )
+            settings_path = root / "settings.json"
+            settings_path.write_text(
+                json.dumps({"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}),
+                encoding="utf-8",
+            )
+            args_path = root / "qwen-arguments.txt"
+            fake_qwen = root / "fake-qwen.ps1"
+            fake_qwen.write_text(
+                "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --output-format stream-json --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth'; exit 0 }\n"
+                "[IO.File]::WriteAllText($env:QWEN_FAKE_ARGS, ($Arguments -join '|'))\n"
+                "Write-Output '{\"type\":\"system\",\"subtype\":\"session_start\",\"session_id\":\"fixture-session\"}'\n"
+                "Write-Output '{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"fixture-session\",\"is_error\":false}'\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    PWSH, "-NoProfile", "-File", str(LAUNCHER),
+                    "-Ticket", "qwen-protocol-pilot-ticket.md", "-Mode", "protocol",
+                    "-ProtocolBudgetProfile", "pilot-expanded",
+                    "-SettingsPath", str(settings_path),
+                    "-ReceiptDirectory", str(root / "receipts"),
+                    "-QwenCommand", str(fake_qwen),
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                env={**os.environ, "QWEN_FAKE_ARGS": str(args_path)},
+                cwd=root,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            projection = json.loads(result.stdout.strip().splitlines()[-1])
+            self.assertEqual(projection["status"], "QWEN_SESSION_GUARD_READY")
+            self.assertEqual(projection["protocol_budget_profile"], "pilot-expanded")
+            self.assertEqual(projection["effective_max_tool_calls"], 40)
+            arguments = args_path.read_text(encoding="utf-8").split("|")
+            self.assertEqual(arguments[arguments.index("--max-tool-calls") + 1], "40")
+            receipt_path = next((root / "receipts").glob("QWEN_SESSION_GUARD-*.json"))
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            self.assertEqual(receipt["receipt_version"], 2)
+            self.assertEqual(receipt["budget_profile"], "pilot-expanded")
+            self.assertEqual(receipt["limits"]["max_tool_calls"], 40)
+            self.assertEqual(receipt["limits"]["max_subagent_depth"], 1)
+
+    def test_pilot_expanded_budget_blocks_outside_disposable_scope_before_cli(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            result = subprocess.run(
+                [
+                    PWSH, "-NoProfile", "-File", str(LAUNCHER),
+                    "-Ticket", "314", "-Mode", "protocol",
+                    "-ProtocolBudgetProfile", "pilot-expanded",
+                    "-SettingsPath", str(root / "missing-settings.json"),
+                    "-ReceiptDirectory", str(root / "receipts"),
+                    "-QwenCommand", str(root / "missing-qwen.cmd"),
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                cwd=REPOSITORY_ROOT,
+            )
+
+            self.assertEqual(result.returncode, 3, result.stderr + result.stdout)
+            projection = json.loads(result.stdout.strip().splitlines()[-1])
+            self.assertEqual(projection["reason"], "PILOT_BUDGET_SCOPE_REQUIRED")
+            self.assertEqual(projection["effective_max_tool_calls"], 40)
 
     def test_protocol_launcher_preserves_raw_free_jsonl_error_classification(self) -> None:
         self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
@@ -241,18 +467,16 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             receipt_directory = root / "receipts"
             fake_qwen = root / "fake-qwen.ps1"
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             settings_path.write_text(
                 json.dumps({"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}),
                 encoding="utf-8",
             )
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --json-file'; exit 0 }\n"
-                "$jsonIndex = [Array]::IndexOf($Arguments, '--json-file')\n"
-                "[IO.File]::WriteAllLines($Arguments[$jsonIndex + 1], [string[]]@('{\"type\":\"system\",\"subtype\":\"session_start\",\"session_id\":\"private-session\"}', '{\"type\":\"result\",\"is_error\":true,\"subtype\":\"error_during_execution\",\"error\":{\"message\":\"HTTP 403 Forbidden https://private.example/v1 secret-token\"}}', '{\"type\":\"system\",\"subtype\":\"session_end\"}'), [Text.UTF8Encoding]::new($false))\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --output-format stream-json --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth'; exit 0 }\n"
+                "Write-Output '{\"type\":\"system\",\"subtype\":\"session_start\",\"session_id\":\"private-session\"}'\n"
+                "Write-Output '{\"type\":\"result\",\"session_id\":\"private-session\",\"is_error\":true,\"subtype\":\"error_during_execution\",\"error\":{\"message\":\"HTTP 403 Forbidden https://private.example/v1 secret-token\"}}'\n"
                 "cmd.exe /c 'exit 7'\n"
                 "exit 7\n",
                 encoding="utf-8",
@@ -288,10 +512,10 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             self.assertEqual(projection["status"], "QWEN_COMMAND_FAILED")
             self.assertEqual(projection["reason"], "QWEN_JSON_ERROR_RESULT", projection)
             self.assertEqual(projection["qwen_exit_code"], 7)
-            self.assertEqual(projection["runtime_projection_exit_code"], 3)
+            self.assertEqual(projection["runtime_projection_exit_code"], 0)
             self.assertTrue(projection["runtime_projection_output_present"])
             self.assertTrue(projection["runtime_projection_parse_valid"])
-            self.assertEqual(projection["runtime_evidence_status"], "QWEN_COMMAND_FAILED")
+            self.assertEqual(projection["runtime_evidence_status"], "COMPLETE")
             self.assertEqual(projection["turn_count"], 0)
             self.assertEqual(projection["tool_call_count"], 0)
             self.assertRegex(projection["session_id"], r"^[0-9a-f]{64}$")
@@ -304,7 +528,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             terminal_receipt_text = terminal_receipts[0].read_text(encoding="utf-8")
             terminal_receipt = json.loads(terminal_receipt_text)
             self.assertEqual(terminal_receipt["receipt_type"], "QWEN_TERMINAL_OUTCOME")
-            self.assertEqual(terminal_receipt["receipt_version"], 1)
+            self.assertEqual(terminal_receipt["receipt_version"], 5)
             self.assertEqual(terminal_receipt["status"], "QWEN_COMMAND_FAILED")
             self.assertEqual(terminal_receipt["reason"], "QWEN_JSON_ERROR_RESULT")
             self.assertEqual(terminal_receipt["diagnostic"]["error_message_category"], "auth_or_forbidden")
@@ -323,18 +547,16 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             receipt_directory = root / "receipts"
             fake_qwen = root / "fake-qwen.ps1"
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             settings_path.write_text(
                 json.dumps({"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}),
                 encoding="utf-8",
             )
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --json-file'; exit 0 }\n"
-                "$jsonIndex = [Array]::IndexOf($Arguments, '--json-file')\n"
-                "[IO.File]::WriteAllText($Arguments[$jsonIndex + 1], '', [Text.UTF8Encoding]::new($false))\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --output-format stream-json --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth'; exit 0 }\n"
+                "Write-Output 'private raw stdout'\n"
+                "[Console]::Error.WriteLine('HTTP 403 Forbidden https://private.example/v1 secret-token')\n"
                 "exit 7\n",
                 encoding="utf-8",
             )
@@ -355,7 +577,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 7, result.stderr + result.stdout)
-            projection = json.loads(result.stdout)
+            projection = json.loads(result.stdout.strip().splitlines()[-1])
             self.assertEqual(projection["status"], "QWEN_COMMAND_FAILED")
             self.assertEqual(projection["runtime_evidence_status"], "QWEN_COMMAND_FAILED")
             self.assertEqual(projection["qwen_exit_code"], 7)
@@ -368,10 +590,154 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             self.assertEqual(len(terminal_receipts), 1)
             terminal_receipt = json.loads(terminal_receipts[0].read_text(encoding="utf-8"))
             self.assertEqual(terminal_receipt["receipt_type"], "QWEN_TERMINAL_OUTCOME")
+            self.assertEqual(terminal_receipt["receipt_version"], 5)
             self.assertTrue(terminal_receipt["terminal_receipt_written"])
             self.assertEqual(terminal_receipt["runtime_evidence_status"], "QWEN_COMMAND_FAILED")
+            self.assertEqual(terminal_receipt["launch_diagnostic"], {
+                "schema_version": 2,
+                "outer_stage": "RUNTIME_EVIDENCE_PARSED",
+                "cli_stage": "RUNTIME_PROJECTED",
+                "supervisor_stage": "PROCESS_EXITED",
+                "process_state": "EXITED",
+                "process_exit_code": 7,
+                "event_file_state": "PRESENT",
+                "event_file_bytes": 20,
+                "console_output_mode": "SUPPRESSED",
+            }, json.dumps(terminal_receipt["launch_diagnostic"], sort_keys=True))
+            process_diagnostic = projection["process_output_diagnostic"]
+            self.assertEqual(process_diagnostic["capture_status"], "PROJECTED")
+            self.assertEqual(process_diagnostic["reason"], "QWEN_COMMAND_FAILED")
+            self.assertTrue(process_diagnostic["diagnostic"]["stdout_present"])
+            self.assertTrue(process_diagnostic["diagnostic"]["stderr_present"])
+            self.assertEqual(process_diagnostic["diagnostic"]["error_message_category"], "auth_or_forbidden")
+            terminal_receipt_text = terminal_receipts[0].read_text(encoding="utf-8")
+            terminal_receipt = json.loads(terminal_receipt_text)
+            self.assertEqual(terminal_receipt["process_output_diagnostic"], process_diagnostic)
+            for forbidden in ("private raw stdout", "private.example", "secret-token", "403 Forbidden"):
+                self.assertNotIn(forbidden, result.stdout + result.stderr)
+                self.assertNotIn(forbidden, terminal_receipt_text)
 
-    def test_protocol_applies_process_scoped_output_limit_and_restores_prior_value(self) -> None:
+    def test_protocol_launcher_persists_raw_free_partial_event_observation(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            settings_path = root / "settings.json"
+            extension_root = root / "proofloop-skills"
+            receipt_directory = root / "receipts"
+            fake_qwen = root / "fake-qwen.ps1"
+            extension_root.mkdir()
+            write_proofloop_extension_fixture(extension_root)
+            settings_path.write_text(
+                json.dumps({"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}),
+                encoding="utf-8",
+            )
+            fake_qwen.write_text(
+                "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --output-format stream-json --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth'; exit 0 }\n"
+                "Write-Output '{\"type\":\"system\",\"subtype\":\"session_start\",\"session_id\":\"private-session\"}'\n"
+                "Write-Output '{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"private prompt\"}]}}'\n"
+                "Write-Output '{\"type\":\"assistant\",\"message\":{\"id\":\"private-message\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"private-tool\",\"name\":\"Agent\",\"input\":{\"subagent_type\":\"finish-ticket-implementer\",\"prompt\":\"private role prompt\"}}]}}'\n"
+                "Write-Output '{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"private-tool\",\"content\":\"private tool error\",\"is_error\":true}]}}'\n"
+                "Write-Output '{\"type\":\"result\",\"private\":\"private terminal secret\"'\n"
+                "exit 7\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    PWSH, "-NoProfile", "-File", str(LAUNCHER),
+                    "-Ticket", "18", "-Mode", "protocol",
+                    "-SettingsPath", str(settings_path),
+                    "-ExtensionRoot", str(extension_root),
+                    "-ReceiptDirectory", str(receipt_directory),
+                    "-QwenCommand", str(fake_qwen),
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                env={**os.environ, "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")},
+            )
+
+            self.assertEqual(result.returncode, 7, result.stderr + result.stdout)
+            projection = json.loads(result.stdout.strip().splitlines()[-1])
+            expected_observation = {
+                "event_lines_observed": 4,
+                "assistant_turns_observed": 1,
+                "tool_dispatches_observed": 1,
+                "tool_results_observed": 1,
+                "tool_errors_observed": 1,
+                "agent_dispatches_observed": 1,
+                "terminal_result_seen": False,
+            }
+            self.assertEqual(projection["partial_observation"], expected_observation)
+            terminal_receipt = next(receipt_directory.glob("QWEN_TERMINAL_OUTCOME-*.json"))
+            receipt_text = terminal_receipt.read_text(encoding="utf-8")
+            receipt = json.loads(receipt_text)
+            self.assertEqual(receipt["receipt_version"], 5)
+            self.assertEqual(receipt["partial_observation"], expected_observation)
+            for forbidden in ("private-session", "private prompt", "private role prompt", "private tool error", "private terminal secret"):
+                self.assertNotIn(forbidden, result.stdout + result.stderr)
+                self.assertNotIn(forbidden, receipt_text)
+
+    def test_protocol_launcher_preserves_specific_raw_free_projection_reason(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            settings_path = root / "settings.json"
+            extension_root = root / "proofloop-skills"
+            receipt_directory = root / "receipts"
+            fake_qwen = root / "fake-qwen.ps1"
+            extension_root.mkdir()
+            write_proofloop_extension_fixture(extension_root)
+            settings_path.write_text(
+                json.dumps({"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}),
+                encoding="utf-8",
+            )
+            fake_qwen.write_text(
+                "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --output-format stream-json --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth'; exit 0 }\n"
+                "Write-Output '{\"type\":\"system\",\"subtype\":\"session_start\",\"session_id\":\"private-session\"}'\n"
+                "Write-Output '{\"type\":\"assistant\",\"message\":{\"id\":\"private-message\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"private-tool\",\"name\":\"ReadFile\",\"input\":{\"path\":\"private-path\"}}]}}'\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    PWSH, "-NoProfile", "-File", str(LAUNCHER),
+                    "-Ticket", "18", "-Mode", "protocol",
+                    "-SettingsPath", str(settings_path),
+                    "-ExtensionRoot", str(extension_root),
+                    "-ReceiptDirectory", str(receipt_directory),
+                    "-QwenCommand", str(fake_qwen),
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                env={**os.environ, "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")},
+            )
+
+            self.assertEqual(result.returncode, 3, result.stderr + result.stdout)
+            projection = json.loads(result.stdout.strip().splitlines()[-1])
+            self.assertEqual(projection["status"], "BLOCKED_CAPABILITY")
+            self.assertEqual(projection["reason"], "QWEN_RUNTIME_EVIDENCE_UNSUPPORTED")
+            self.assertEqual(projection["runtime_projection_reason"], "TOOL_RESULT_MISSING")
+            self.assertEqual(projection["runtime_evidence_status"], "BLOCKED")
+            self.assertEqual(projection["event_coverage"], "INCOMPLETE")
+            terminal_receipt = next(receipt_directory.glob("QWEN_TERMINAL_OUTCOME-*.json"))
+            receipt_text = terminal_receipt.read_text(encoding="utf-8")
+            receipt = json.loads(receipt_text)
+            self.assertEqual(receipt["receipt_version"], 5)
+            self.assertEqual(receipt["reason"], "QWEN_RUNTIME_EVIDENCE_UNSUPPORTED")
+            self.assertEqual(receipt["runtime_projection_reason"], "TOOL_RESULT_MISSING")
+            self.assertEqual(receipt["partial_observation"]["tool_dispatches_observed"], 1)
+            self.assertEqual(receipt["partial_observation"]["tool_results_observed"], 0)
+            for forbidden in ("private-session", "private-message", "private-tool", "private-path"):
+                self.assertNotIn(forbidden, result.stdout + result.stderr)
+                self.assertNotIn(forbidden, receipt_text)
+
+    def test_protocol_preserves_process_output_limit_without_override(self) -> None:
         self.assertIsNotNone(PWSH, "PowerShell is required for process environment behavior")
 
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -393,7 +759,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                         [
                             "--max-session-turns", "20", "--max-tool-calls", "20",
                             "--max-wall-time", "30m", "--max-subagent-depth", "1",
-                            "--prompt", "/finish-ticket ticket 18",
+                            "--output-format", "stream-json", "--prompt", "/finish-ticket ticket 18",
                         ]
                     ),
                 }
@@ -410,32 +776,28 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-            self.assertEqual(observed.read_text(encoding="utf-8"), "8000")
+            self.assertEqual(observed.read_text(encoding="utf-8"), "prior-value")
             self.assertIn("restored=prior-value", result.stdout)
 
-    def test_protocol_event_sidecar_is_removed_when_qwen_throws(self) -> None:
+    def test_protocol_stream_output_is_not_leaked_when_qwen_throws(self) -> None:
         self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             fake_qwen = root / "fake-qwen.ps1"
-            event_path_observation = root / "event-path.txt"
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "$jsonIndex = [Array]::IndexOf($Arguments, '--json-file')\n"
-                "[IO.File]::WriteAllText($env:QWEN_FAKE_EVENT_PATH, $Arguments[$jsonIndex + 1])\n"
                 "throw 'private event content'\n",
                 encoding="utf-8",
             )
             environment = os.environ.copy()
             environment.update({
-                "QWEN_FAKE_EVENT_PATH": str(event_path_observation),
                 "QWEN_CLI_WRAPPER": str(CLI_COMPATIBILITY_CONSUMER),
                 "QWEN_FAKE_CLI": str(fake_qwen),
                 "QWEN_PROTOCOL_ARGS": json.dumps([
                     "--max-session-turns", "20", "--max-tool-calls", "20",
                     "--max-wall-time", "30m", "--max-subagent-depth", "1",
-                    "--prompt", "/finish-ticket ticket 18",
+                    "--output-format", "stream-json", "--prompt", "/finish-ticket ticket 18",
                 ]),
             })
             result = subprocess.run(
@@ -450,8 +812,6 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             projection = json.loads(result.stdout)
             self.assertEqual(projection["reason"], "QWEN_COMMAND_FAILED")
             self.assertNotIn("private event content", result.stdout + result.stderr)
-            event_path = Path(event_path_observation.read_text(encoding="utf-8"))
-            self.assertFalse(event_path.exists())
 
     def test_protocol_preserves_projected_counters_when_qwen_exits_nonzero(self) -> None:
         self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
@@ -461,21 +821,18 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             fake_qwen = root / "fake-qwen.ps1"
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "$jsonIndex = [Array]::IndexOf($Arguments, '--json-file')\n"
-                "$eventPath = $Arguments[$jsonIndex + 1]\n"
-                "[IO.File]::WriteAllText($env:QWEN_FAKE_EVENT_PATH, $eventPath)\n"
-                "[IO.File]::WriteAllLines($eventPath, [string[]]@('{\"type\":\"system\",\"subtype\":\"session_start\",\"session_id\":\"fixture-session\"}', '{\"type\":\"assistant\",\"message\":{\"id\":\"turn-1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"PRIVATE\"}]}}', '{\"type\":\"system\",\"subtype\":\"session_end\",\"data\":{\"reason\":\"prompt_input_exit\"}}'), [Text.UTF8Encoding]::new($false))\n"
+                "Write-Output '{\"type\":\"system\",\"subtype\":\"session_start\",\"session_id\":\"fixture-session\"}'\n"
+                "Write-Output '{\"type\":\"assistant\",\"message\":{\"id\":\"turn-1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"PRIVATE\"}]}}'\n"
+                "Write-Output '{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"fixture-session\",\"is_error\":false}'\n"
                 "exit 7\n",
                 encoding="utf-8",
             )
-            event_path_observation = root / "event-path.txt"
             arguments = [
                 "--max-session-turns", "20", "--max-tool-calls", "20",
                 "--max-wall-time", "30m", "--max-subagent-depth", "1",
-                "--prompt", "/finish-ticket ticket 18",
+                "--output-format", "stream-json", "--prompt", "/finish-ticket ticket 18",
             ]
             environment = os.environ.copy()
-            environment["QWEN_FAKE_EVENT_PATH"] = str(event_path_observation)
             result = subprocess.run(
                 [
                     PWSH, "-NoProfile", "-Command",
@@ -500,9 +857,6 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             self.assertEqual(projection["turns"], 1)
             self.assertEqual(projection["tool_calls"], 0)
             self.assertNotIn("PRIVATE", result.stdout + result.stderr)
-            # The Qwen sidecar is deleted even when the child returns a failure exit.
-            event_path = Path(event_path_observation.read_text(encoding="utf-8"))
-            self.assertFalse(event_path.exists())
 
     def test_recon_schema_requires_terminal_outcome_fields(self) -> None:
         schema = json.loads(RECON_SCHEMA.read_text(encoding="utf-8"))
@@ -542,7 +896,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 encoding="utf-8",
             )
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(json.dumps({"name": "proofloop-skills"}), encoding="utf-8")
+            write_proofloop_extension_fixture(extension_root)
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
                 "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --worktree --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands plan'; exit 0 }\n"
@@ -605,9 +959,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 encoding="utf-8",
             )
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
                 "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --worktree --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
@@ -670,9 +1022,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 encoding="utf-8",
             )
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
                 "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
@@ -739,9 +1089,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 encoding="utf-8",
             )
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
                 "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
@@ -801,9 +1149,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 encoding="utf-8",
             )
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
                 "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
@@ -870,9 +1216,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 encoding="utf-8",
             )
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             baseline = subprocess.run(
                 [GIT, "-C", str(recon_worktree), "rev-parse", "HEAD"],
                 check=True,
@@ -958,9 +1302,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 encoding="utf-8",
             )
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
                 "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --worktree --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
@@ -1011,7 +1353,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                     "terminal_result": False,
                     "terminal_is_error": False,
                     "terminal_subtype": "none",
-                    "error_message_present": False,
+                    "error_message_present": True,
                     "error_message_category": "structured_output_missing",
                     "envelope_is_error": False,
                     "envelope_subtype": "none",
@@ -1046,12 +1388,15 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             )
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --json-file'; exit 0 }\n"
-                "$jsonIndex = [Array]::IndexOf($Arguments, '--json-file')\n"
-                "if ($jsonIndex -ge 0) { [IO.File]::WriteAllLines($Arguments[$jsonIndex + 1], [string[]]@('{\"type\":\"system\",\"subtype\":\"session_start\",\"session_id\":\"fixture-session\"}', '{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"content\":[]}}', '{\"type\":\"system\",\"subtype\":\"session_end\",\"data\":{\"reason\":\"prompt_input_exit\"}}'), [Text.UTF8Encoding]::new($false)) }\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --output-format stream-json --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth'; exit 0 }\n"
+                "Write-Output '{\"type\":\"system\",\"subtype\":\"session_start\",\"session_id\":\"fixture-session\"}'\n"
+                "Write-Output '{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"content\":[]}}'\n"
+                "Write-Output '{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"fixture-session\",\"is_error\":false}'\n"
                 "[IO.File]::WriteAllText($env:QWEN_FAKE_REACHED, ($Arguments -join [Environment]::NewLine))\n",
                 encoding="utf-8",
             )
+            extension_root.mkdir()
+            write_proofloop_extension_fixture(extension_root)
 
             def launch(*extra_arguments: str) -> subprocess.CompletedProcess[str]:
                 environment = os.environ.copy()
@@ -1086,7 +1431,6 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 ("safe-mode", ("-SafeMode",), "SAFE_MODE_REQUESTED"),
                 ("loop-detection", (), "LOOP_DETECTION_DISABLED"),
                 ("nesting", (), "MAX_SUBAGENT_DEPTH_EXCEEDED"),
-                ("extension", (), "PROOFLOOP_EXTENSION_MISSING"),
             )
             for case, extra_arguments, expected_reason in blocked_cases:
                 if case == "loop-detection":
@@ -1117,10 +1461,11 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                     self.assertGreaterEqual(projection["duration_ms"], 0)
                     self.assertFalse(reached_path.exists())
 
-            extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
+            settings_path.write_text(
+                json.dumps({"model": {"skipLoopDetection": False, "maxToolCallsPerTurn": 20, "maxSubagentDepth": 1, "reasoningEffort": "xhigh"}}),
+                encoding="utf-8",
             )
+            (extension_root / "qwen-extension.json").unlink()
             result = launch()
 
             self.assertEqual(
@@ -1143,7 +1488,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             self.assertTrue(reached_path.is_file())
             recorded_arguments = reached_path.read_text(encoding="utf-8").splitlines()
             self.assertEqual(
-                recorded_arguments[:10],
+                recorded_arguments,
                 [
                     "--max-session-turns",
                     "20",
@@ -1153,12 +1498,12 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                     "30m",
                     "--max-subagent-depth",
                     "1",
+                    "--output-format",
+                    "stream-json",
                     "--prompt",
                     "/finish-ticket ticket 16",
                 ],
             )
-            self.assertEqual(recorded_arguments[10], "--json-file")
-            self.assertFalse(Path(recorded_arguments[11]).exists())
             receipts = list(receipt_directory.glob("QWEN_SESSION_GUARD-*.json"))
             self.assertEqual(len(receipts), 1)
             receipt_text = receipts[0].read_text(encoding="utf-8")
@@ -1173,7 +1518,8 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 {"max_session_turns": 20, "max_tool_calls": 20, "max_wall_time": "30m", "max_subagent_depth": 1},
             )
             self.assertTrue(receipt["loop_detection"])
-            self.assertTrue(receipt["extension_available"])
+            self.assertTrue(receipt["finish_ticket_skill_available"])
+            self.assertNotIn("extension_available", receipt)
             self.assertNotIn(str(temporary_root), receipt_text)
             self.assertNotIn("SECRET", receipt_text.upper())
 
@@ -1189,7 +1535,8 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             facts = RUNTIME_ADAPTER.collect_host_facts(
                 host_repo, ticket="314", task_source="tickets.md", scope_source="scope.md"
             )
-            ledger = AdapterFixtures.make_progress_ledger(facts)
+            continuation_context = "x" * 14_000
+            ledger = AdapterFixtures.make_progress_ledger(facts, continuation_context=continuation_context)
             test_receipt = AdapterFixtures.make_receipt(facts, ledger["events"][0], kind="test", status="GREEN")
             checkpoint = AdapterFixtures.make_checkpoint(facts, ledger, test_receipt)
             evidence = {
@@ -1202,7 +1549,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 "progress_ledger": ledger,
                 "test_receipt": test_receipt,
                 "review_receipt": None,
-                "continuation_context": "Complete the next measurable closure in the existing scope.",
+                "continuation_context": continuation_context,
                 "prior_projection": AdapterFixtures.prior_terminal_receipt(),
             }
             evidence_path = temporary_root / "controller-evidence.json"
@@ -1217,26 +1564,32 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             }}), encoding="utf-8")
             extension_root = temporary_root / "proofloop-skills"
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(json.dumps({"name": "proofloop-skills"}), encoding="utf-8")
+            write_proofloop_extension_fixture(extension_root)
             receipt_directory = temporary_root / "receipts"
             fake_qwen = temporary_root / "fake-qwen.ps1"
             reached_path = temporary_root / "reached.json"
             argument_summary_path = temporary_root / "argument-summary.json"
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --json-file'; exit 0 }\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --output-format stream-json --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth'; exit 0 }\n"
                 "$promptIndex = [Array]::IndexOf($Arguments, '--prompt')\n"
-                "$jsonIndex = [Array]::IndexOf($Arguments, '--json-file')\n"
-                "$promptHasMarker = $promptIndex -ge 0 -and $Arguments[$promptIndex + 1] -match 'PROOFLOOP_VERIFIED_CONTINUATION'\n"
-                "[IO.File]::WriteAllText($env:QWEN_FAKE_ARGUMENT_SUMMARY, (@{ count=$Arguments.Count; prompt_index=$promptIndex; prompt_has_marker=$promptHasMarker; json_index=$jsonIndex } | ConvertTo-Json -Compress))\n"
-                "if ($Arguments[$promptIndex + 1] -notmatch 'PROOFLOOP_VERIFIED_CONTINUATION' -or $jsonIndex -lt 0) { exit 9 }\n"
+                "$formatIndex = [Array]::IndexOf($Arguments, '--output-format')\n"
+                "$promptText = if ($promptIndex -ge 0) { [string]$Arguments[$promptIndex + 1] } else { '' }\n"
+                "$promptHasMarker = $promptText -match 'PROOFLOOP_VERIFIED_CONTINUATION'\n"
+                "$expectedPacketSuffix = \"`n`nPROOFLOOP_VERIFIED_CONTINUATION:`n\" + ('x' * 14000)\n"
+                "$promptHasFullPacket = $promptText.EndsWith($expectedPacketSuffix)\n"
+                "[IO.File]::WriteAllText($env:QWEN_FAKE_ARGUMENT_SUMMARY, (@{ count=$Arguments.Count; prompt_index=$promptIndex; prompt_has_marker=$promptHasMarker; prompt_has_full_packet=$promptHasFullPacket; format_index=$formatIndex; format_value=$Arguments[$formatIndex + 1] } | ConvertTo-Json -Compress))\n"
+                "if ($Arguments[$promptIndex + 1] -notmatch 'PROOFLOOP_VERIFIED_CONTINUATION' -or $formatIndex -lt 0 -or $Arguments[$formatIndex + 1] -ne 'stream-json') { exit 9 }\n"
                 "[IO.File]::WriteAllText($env:QWEN_FAKE_REACHED, ($Arguments | ConvertTo-Json -Compress))\n"
-                "[IO.File]::WriteAllLines($Arguments[$jsonIndex + 1], [string[]]@('{\"type\":\"system\",\"subtype\":\"session_start\",\"session_id\":\"fixture-session\"}', '{\"type\":\"system\",\"subtype\":\"session_end\",\"data\":{\"reason\":\"prompt_input_exit\"}}'), [Text.UTF8Encoding]::new($false))\n",
+                "Write-Output '{\"type\":\"system\",\"subtype\":\"session_start\",\"session_id\":\"fixture-session\"}'\n"
+                "Write-Output '{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"fixture-session\",\"is_error\":false}'\n",
                 encoding="utf-8",
             )
             environment = os.environ.copy()
             environment["QWEN_FAKE_REACHED"] = str(reached_path)
             environment["QWEN_FAKE_ARGUMENT_SUMMARY"] = str(argument_summary_path)
+            environment["TEMP"] = str(temporary_root)
+            environment["TMP"] = str(temporary_root)
             result = subprocess.run(
                 [
                     PWSH, "-NoProfile", "-File", str(LAUNCHER),
@@ -1254,13 +1607,17 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout + argument_summary)
             status = json.loads(result.stdout)
             self.assertEqual(status["status"], "QWEN_SESSION_GUARD_READY")
+            argument_summary = json.loads(argument_summary_path.read_text(encoding="utf-8"))
+            self.assertTrue(argument_summary["prompt_has_full_packet"])
             executed = json.loads(reached_path.read_text(encoding="utf-8"))
             self.assertEqual(executed.count("--prompt"), 1)
-            self.assertEqual(executed.count("--json-file"), 1)
+            self.assertEqual(executed.count("--output-format"), 1)
+            self.assertEqual(executed[executed.index("--output-format") + 1], "stream-json")
             self.assertTrue(any("PROOFLOOP_VERIFIED_CONTINUATION" in arg for arg in executed))
             self.assertEqual(len(list(receipt_directory.glob("QWEN_CHECKPOINT-CONSUMED-*.json"))), 1)
             self.assertEqual(len(list(receipt_directory.glob("QWEN_PROGRESS-CONSUMED-*.json"))), 1)
             self.assertEqual(len(list(receipt_directory.glob("QWEN_RUNTIME_LEDGER-*.json"))), 1)
+            self.assertFalse(list(temporary_root.glob("tmp*.tmp")))
 
     def test_launcher_blocks_missing_cli_capability_before_ticket_work(self) -> None:
         self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
@@ -1285,9 +1642,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 encoding="utf-8",
             )
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
                 "if ($Arguments -contains '--help') { Write-Output '--prompt --max-session-turns --max-wall-time --max-subagent-depth'; exit 0 }\n"
@@ -1347,11 +1702,11 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 encoding="utf-8",
             )
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(json.dumps({"name": "proofloop-skills"}), encoding="utf-8")
+            write_proofloop_extension_fixture(extension_root)
             evidence_path.write_text("{}", encoding="utf-8")
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "if ($Arguments -contains '--help') { Write-Output '--prompt --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --json-file'; exit 0 }\n"
+                "if ($Arguments -contains '--help') { Write-Output '--prompt --output-format stream-json --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth'; exit 0 }\n"
                 "[IO.File]::WriteAllText($env:QWEN_FAKE_REACHED, 'reached')\n",
                 encoding="utf-8",
             )
@@ -1386,6 +1741,8 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             "30m",
             "--max-subagent-depth",
             "1",
+            "--output-format",
+            "stream-json",
             "--prompt",
             "/finish-ticket ticket 16",
         ]
@@ -1395,9 +1752,10 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             reached_path = temporary_root / "strict-fake-qwen-reached.json"
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
-                "$expected = @('--max-session-turns', '20', '--max-tool-calls', '20', '--max-wall-time', '30m', '--max-subagent-depth', '1', '--prompt', '/finish-ticket ticket 16')\n"
-                "if ($Arguments.Count -ne ($expected.Count + 2) -or @(0..($expected.Count - 1) | Where-Object { $Arguments[$_] -ne $expected[$_] }).Count -ne 0 -or $Arguments[$expected.Count] -ne '--json-file') { exit 9 }\n"
-                "[IO.File]::WriteAllLines($Arguments[$expected.Count + 1], [string[]]@('{\"type\":\"system\",\"subtype\":\"session_start\",\"session_id\":\"fixture-session\"}', '{\"type\":\"system\",\"subtype\":\"session_end\",\"data\":{\"reason\":\"prompt_input_exit\"}}'), [Text.UTF8Encoding]::new($false))\n"
+                "$expected = @('--max-session-turns', '20', '--max-tool-calls', '20', '--max-wall-time', '30m', '--max-subagent-depth', '1', '--output-format', 'stream-json', '--prompt', '/finish-ticket ticket 16')\n"
+                "if ($Arguments.Count -ne $expected.Count -or @(0..($expected.Count - 1) | Where-Object { $Arguments[$_] -ne $expected[$_] }).Count -ne 0) { exit 9 }\n"
+                "Write-Output '{\"type\":\"system\",\"subtype\":\"session_start\",\"session_id\":\"fixture-session\"}'\n"
+                "Write-Output '{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"fixture-session\",\"is_error\":false}'\n"
                 "[IO.File]::WriteAllText($env:QWEN_FAKE_REACHED, ($Arguments | ConvertTo-Json -Compress))\n",
                 encoding="utf-8",
             )
@@ -1426,11 +1784,12 @@ class QwenRuntimeGuardTest(unittest.TestCase):
             self.assertEqual(accepted.returncode, 0)
             executed = json.loads(reached_path.read_text(encoding="utf-8"))
             self.assertEqual(executed[: len(expected_arguments)], expected_arguments)
-            self.assertEqual(executed[len(expected_arguments)], "--json-file")
-            self.assertFalse(Path(executed[len(expected_arguments) + 1]).exists())
+            self.assertEqual(len(executed), len(expected_arguments))
 
             for rejected_arguments in (
                 expected_arguments[:-1],
+                [*expected_arguments[:-1], "/proofloop-skills:finish-ticket ticket 16"],
+                [*expected_arguments[:10], "--prompt-interactive", expected_arguments[11]],
                 [*expected_arguments, "--safe-mode"],
                 ["--safe-mode", *expected_arguments],
             ):
@@ -1441,9 +1800,98 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                     self.assertEqual(rejected.returncode, 5)
                     self.assertEqual(
                         json.loads(rejected.stdout),
-                        {"status": "QWEN_COMMAND_REJECTED", "reason": "QWEN_ARGUMENT_CONTRACT_INVALID"},
+                        {"status": "QWEN_COMMAND_REJECTED", "reason": "QWEN_ARGUMENT_CONTRACT_INVALID", "cli_failure_stage": "ARGUMENT_CONTRACT"},
                     )
                     self.assertFalse(reached_path.exists())
+
+    def test_qwen_cli_consumer_cannot_bypass_expanded_pilot_scope_gate(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
+        expanded_arguments = [
+            "--max-session-turns", "20", "--max-tool-calls", "40",
+            "--max-wall-time", "30m", "--max-subagent-depth", "1",
+            "--output-format", "stream-json", "--prompt",
+            "/finish-ticket ticket qwen-protocol-pilot-ticket.md",
+        ]
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            result = subprocess.run(
+                [
+                    PWSH, "-NoProfile", "-File", str(CLI_COMPATIBILITY_CONSUMER),
+                    "-QwenCommand", str(Path(temporary_directory) / "missing-qwen.cmd"),
+                    "-Mode", "protocol", "-ProtocolBudgetProfile", "pilot-expanded",
+                    "-QwenArgumentsJson", json.dumps(expanded_arguments),
+                    "-CredentialTarget", "ProofLoop/Test/NotRead",
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                cwd=REPOSITORY_ROOT,
+            )
+
+        self.assertEqual(result.returncode, 5)
+        self.assertEqual(
+            json.loads(result.stdout),
+            {
+                "status": "QWEN_COMMAND_REJECTED",
+                "reason": "PILOT_BUDGET_SCOPE_REQUIRED",
+                "cli_failure_stage": "ARGUMENT_CONTRACT",
+            },
+        )
+
+    def test_qwen_cli_prelaunch_failure_projects_only_allowlisted_stage(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
+
+        expected_arguments = [
+            "--max-session-turns", "20", "--max-tool-calls", "20",
+            "--max-wall-time", "30m", "--max-subagent-depth", "1",
+            "--output-format", "stream-json", "--prompt", "/finish-ticket ticket 16",
+        ]
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            missing_target = f"ProofLoop/Test/Absent-{os.urandom(8).hex()}"
+            result = subprocess.run(
+                [
+                    PWSH, "-NoProfile", "-File", str(CLI_COMPATIBILITY_CONSUMER),
+                    "-QwenCommand", str(Path(temporary_directory) / "qwen.cmd"),
+                    "-QwenArgumentsJson", json.dumps(expected_arguments),
+                    "-CredentialTarget", missing_target,
+                ],
+                check=False, capture_output=True, encoding="utf-8",
+            )
+
+        projection = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 4)
+        self.assertEqual(projection["status"], "QWEN_COMMAND_FAILED")
+        self.assertEqual(projection["reason"], "QWEN_COMMAND_UNAVAILABLE")
+        self.assertEqual(projection["cli_failure_stage"], "CREDENTIAL_LOOKUP")
+        self.assertNotIn(missing_target, result.stdout)
+
+    def test_qwen_cli_helper_load_failure_has_distinct_raw_free_stage(self) -> None:
+        self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
+
+        expected_arguments = [
+            "--max-session-turns", "20", "--max-tool-calls", "20",
+            "--max-wall-time", "30m", "--max-subagent-depth", "1",
+            "--output-format", "stream-json", "--prompt", "/finish-ticket ticket 16",
+        ]
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            consumer_copy = root / "invoke_qwen_finish_ticket_cli.ps1"
+            shutil.copyfile(CLI_COMPATIBILITY_CONSUMER, consumer_copy)
+            shutil.copyfile(REPOSITORY_ROOT / "scripts" / "qwen_invocation_contract.py", root / "qwen_invocation_contract.py")
+            result = subprocess.run(
+                [
+                    PWSH, "-NoProfile", "-File", str(consumer_copy),
+                    "-QwenCommand", str(root / "qwen.cmd"),
+                    "-QwenArgumentsJson", json.dumps(expected_arguments),
+                    "-CredentialTarget", "ProofLoop/Test/NotRead",
+                ],
+                check=False, capture_output=True, encoding="utf-8",
+            )
+
+        projection = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 4)
+        self.assertEqual(projection["status"], "QWEN_COMMAND_FAILED")
+        self.assertEqual(projection["cli_failure_stage"], "CREDENTIAL_HELPER_LOAD")
+        self.assertNotIn(temporary_directory, result.stdout)
 
     def test_launcher_recon_is_read_only_bounded_and_returns_structured_report(self) -> None:
         self.assertIsNotNone(PWSH, "PowerShell is required for the launcher contract")
@@ -1470,9 +1918,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 encoding="utf-8",
             )
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
                 "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --worktree --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands plan'; exit 0 }\n"
@@ -1610,9 +2056,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 encoding="utf-8",
             )
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
                 "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --json-schema --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"
@@ -1685,9 +2129,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 encoding="utf-8",
             )
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
                 "[IO.File]::WriteAllText($env:QWEN_FAKE_REACHED, 'reached')\n"
@@ -1738,9 +2180,7 @@ class QwenRuntimeGuardTest(unittest.TestCase):
                 encoding="utf-8",
             )
             extension_root.mkdir()
-            (extension_root / "qwen-extension.json").write_text(
-                json.dumps({"name": "proofloop-skills"}), encoding="utf-8"
-            )
+            write_proofloop_extension_fixture(extension_root)
             fake_qwen.write_text(
                 "param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Arguments)\n"
                 "if ($Arguments -contains '--help') { Write-Output '--prompt --bare --approval-mode --output-format --worktree --max-session-turns --max-tool-calls --max-wall-time --max-subagent-depth --exclude-tools --disabled-slash-commands --no-thinking plan'; exit 0 }\n"

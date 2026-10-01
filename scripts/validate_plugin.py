@@ -19,7 +19,7 @@ REQUIRED_CAPABILITIES = (
 )
 CAPABILITY_TIERS = ("efficient", "standard", "frontier")
 TRUSTED_CODEX_PROVENANCE = {"provider": "openai", "source": "codex-runtime"}
-TRUSTED_QWEN_RUNTIME = {"provider": "qwen", "product": "qwen-code", "version": "0.22.2"}
+TRUSTED_QWEN_RUNTIME_IDENTITY = {"provider": "qwen", "product": "qwen-code"}
 QWEN_BOOLEAN_CAPABILITIES = (
     "role_model_identity_lock",
     "fresh_named_subagent",
@@ -48,7 +48,6 @@ REQUIRED_CONTRACT_TERMS = (
     "tool policy",
     "observed usage",
     "Codex adaptive profile",
-    "Qwen Code v0.22.2",
     "Qwen single-model profile",
     "fresh named subagent",
     "read-only Reviewer",
@@ -235,12 +234,22 @@ def select_codex_profile(capabilities: object) -> dict[str, object]:
 
 
 def select_qwen_profile(capabilities: dict[str, object]) -> dict[str, object]:
-    """Validate the documented Qwen Code v0.22.2 preflight fixture schema."""
+    """Validate Qwen identity and observed role capabilities without a version allow-list."""
     runtime = capabilities.get("runtime")
-    if not isinstance(runtime, dict) or any(
-        runtime.get(field) != value for field, value in TRUSTED_QWEN_RUNTIME.items()
+    if (
+        not isinstance(runtime, dict)
+        or any(
+            runtime.get(field) != value
+            for field, value in TRUSTED_QWEN_RUNTIME_IDENTITY.items()
+        )
+        or not isinstance(runtime.get("version"), str)
+        or not runtime["version"].strip()
     ):
         return {"status": "BLOCKED_CAPABILITY", "untrusted_capabilities": ["runtime"]}
+    runtime_observation = {
+        **TRUSTED_QWEN_RUNTIME_IDENTITY,
+        "version": runtime["version"],
+    }
 
     missing = [
         capability
@@ -290,7 +299,7 @@ def select_qwen_profile(capabilities: dict[str, object]) -> dict[str, object]:
     return {
         "status": "QWEN_PROFILE",
         "configuration": {
-            "runtime": TRUSTED_QWEN_RUNTIME,
+            "runtime": runtime_observation,
             "model": model,
             "roles": {role: model.copy() for role in CODEX_ROUTE_REQUIREMENTS},
         },
@@ -391,12 +400,25 @@ def has_complete_candidate_trace(entry: dict[str, object]) -> bool:
     return (
         isinstance(entry.get("normalized_root_cause"), str)
         and bool(entry["normalized_root_cause"].strip())
-        and entry.get("runtime") == TRUSTED_QWEN_RUNTIME
+        and is_qwen_runtime_observation(entry.get("runtime"))
         and isinstance(model, dict)
         and set(model) == {"id"}
         and isinstance(model.get("id"), str)
         and bool(model["id"].strip())
         and entry.get("usage") in {"AVAILABLE", "NOT_AVAILABLE"}
+    )
+
+
+def is_qwen_runtime_observation(runtime: object) -> bool:
+    """Accept any observed Qwen Code version while keeping provider identity explicit."""
+    return (
+        isinstance(runtime, dict)
+        and all(
+            runtime.get(field) == value
+            for field, value in TRUSTED_QWEN_RUNTIME_IDENTITY.items()
+        )
+        and isinstance(runtime.get("version"), str)
+        and bool(runtime["version"].strip())
     )
 
 
@@ -957,7 +979,7 @@ def _runtime_receipt_reason(
         or receipt.get("mode") != "protocol"
         or receipt.get("limits") != QWEN_RUNTIME_LIMITS
         or receipt.get("loop_detection") is not True
-        or receipt.get("extension_available") is not True
+        or receipt.get("finish_ticket_skill_available") is not True
     ):
         return "RECEIPT_MISMATCHED"
     issued_at = _parse_runtime_utc(receipt.get("issued_at_utc"))
@@ -2152,7 +2174,7 @@ def validate_qwen_delivery_extension(repository_root: Path) -> None:
     assert "model: inherit" in agent_text
     assert "plugins/agentic-development-workflow/skills/finish-ticket/references/task-lifecycle.md" in agent_text
     assert "QWEN_CONVERGENT" in agent_text
-    assert "Qwen Code v0.22.2" in agent_text
+    assert "capability preflight" in agent_text
 
     pilot_text = pilot.read_text(encoding="utf-8")
     assert "QWEN_CLI=ABSENT" in pilot_text

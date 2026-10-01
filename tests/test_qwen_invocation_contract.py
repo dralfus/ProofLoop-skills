@@ -78,9 +78,38 @@ class QwenInvocationContractTest(unittest.TestCase):
                 "--max-tool-calls", "20",
                 "--max-wall-time", "30m",
                 "--max-subagent-depth", "1",
+                "--output-format", "stream-json",
                 "--prompt", "/finish-ticket ticket 16",
             ],
         )
+        protocol_markers = CONTRACT.get_contract("protocol")["required_markers"]
+        self.assertIn("--prompt", protocol_markers)
+        self.assertIn("--output-format", protocol_markers)
+        self.assertIn("stream-json", protocol_markers)
+        self.assertNotIn("--prompt-interactive", protocol_markers)
+        self.assertNotIn("--json-file", protocol_markers)
+
+    def test_expanded_protocol_tool_budget_is_explicit_and_keeps_default_unchanged(self) -> None:
+        standard = CONTRACT.render_argv("protocol", ticket="qwen-protocol-pilot-ticket.md")
+        expanded = CONTRACT.render_argv(
+            "protocol",
+            ticket="qwen-protocol-pilot-ticket.md",
+            protocol_budget_profile="pilot-expanded",
+        )
+
+        self.assertEqual(standard[standard.index("--max-tool-calls") + 1], "20")
+        self.assertEqual(expanded[expanded.index("--max-tool-calls") + 1], "40")
+        self.assertEqual(expanded[expanded.index("--max-session-turns") + 1], "20")
+        self.assertEqual(expanded[expanded.index("--max-wall-time") + 1], "30m")
+        self.assertEqual(expanded[expanded.index("--max-subagent-depth") + 1], "1")
+        with self.assertRaises(ValueError):
+            CONTRACT.render_argv(
+                "protocol", ticket="qwen-protocol-pilot-ticket.md", protocol_budget_profile="unbounded"
+            )
+        with self.assertRaises(ValueError):
+            CONTRACT.render_argv(
+                "protocol", ticket="qwen-protocol-pilot-ticket.md", protocol_budget_profile=[]
+            )
 
         seal = CONTRACT.render_argv(
             "seal",
@@ -96,6 +125,11 @@ class QwenInvocationContractTest(unittest.TestCase):
 
         self.assertEqual(CONTRACT.render_argv("capability_smoke", probe="version"), ["--version"])
         self.assertEqual(CONTRACT.render_argv("capability_smoke", probe="help"), ["--help"])
+        smoke_markers = CONTRACT.get_contract("capability_smoke")["required_markers"]
+        self.assertIn("--prompt", smoke_markers)
+        self.assertIn("--output-format", smoke_markers)
+        self.assertIn("stream-json", smoke_markers)
+        self.assertNotIn("--prompt-interactive", smoke_markers)
 
     def test_registry_returns_copies_and_rejects_ambiguous_rendering(self) -> None:
         first = CONTRACT.get_contract("assist")
@@ -113,8 +147,8 @@ class QwenInvocationContractTest(unittest.TestCase):
         mode_contract.loader.exec_module(modes)
 
         protocol = modes.get_mode_runtime_contract("protocol")
-        self.assertEqual(protocol["output_token_limit"], 8000)
-        self.assertEqual(protocol["process_environment"], {"QWEN_CODE_MAX_OUTPUT_TOKENS": "8000"})
+        self.assertIsNone(protocol["output_token_limit"])
+        self.assertEqual(protocol["process_environment"], {})
         self.assertEqual(protocol["thinking_policy"], "require_configured_reasoning")
         self.assertEqual(protocol["packet_language"], "en")
         self.assertEqual(protocol["response_language"], "ru")
@@ -131,7 +165,8 @@ class QwenInvocationContractTest(unittest.TestCase):
         self.assertEqual(blocked["reason"], "RECON_THINKING_NOT_CONFIGURED")
         ready = modes.evaluate_mode_preflight("protocol", reasoning_effort="xhigh")
         self.assertEqual(ready["status"], "QWEN_MODE_READY")
-        self.assertEqual(ready["process_environment"], {"QWEN_CODE_MAX_OUTPUT_TOKENS": "8000"})
+        self.assertEqual(ready["output_token_limit"], None)
+        self.assertEqual(ready["process_environment"], {})
         disabled = modes.evaluate_mode_preflight("protocol", reasoning_effort="none")
         self.assertEqual(disabled["reason"], "PROTOCOL_THINKING_NOT_CONFIGURED")
 

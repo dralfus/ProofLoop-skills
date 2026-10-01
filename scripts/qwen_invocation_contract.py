@@ -94,15 +94,16 @@ INVOCATION_CONTRACTS: dict[str, dict[str, object]] = {
     ),
     "protocol": _contract(
         limits={"max_session_turns": 20, "max_tool_calls": 20, "max_wall_time": "30m", "max_subagent_depth": 1},
-        markers=["--prompt", "--max-session-turns", "--max-tool-calls", "--max-wall-time", "--max-subagent-depth", "--json-file"],
+        markers=["--prompt", "--output-format", "stream-json", "--max-session-turns", "--max-tool-calls", "--max-wall-time", "--max-subagent-depth"],
         authority={"read_only": False, "role_dispatch": True, "subagent_dispatch": True, "acceptance": False},
     ),
     "capability_smoke": _contract(
         limits={"max_session_turns": 0, "max_tool_calls": 0, "max_wall_time": "0s", "max_subagent_depth": 0},
-        markers=["--prompt", "--max-session-turns", "--max-tool-calls", "--max-wall-time", "--max-subagent-depth"],
+        markers=["--prompt", "--output-format", "stream-json", "--max-session-turns", "--max-tool-calls", "--max-wall-time", "--max-subagent-depth"],
         authority=dict(_COMMON_AUTHORITY),
     ),
 }
+PROTOCOL_TOOL_BUDGETS = {"standard": 20, "pilot-expanded": 40}
 
 
 def get_contract(mode: str) -> dict[str, object]:
@@ -132,6 +133,11 @@ def _limits_argv(contract: dict[str, object]) -> list[str]:
 def render_argv(mode: str, **values: object) -> list[str]:
     """Render canonical argv for one mode without the executable name."""
     contract = get_contract(mode)
+    budget_profile = values.get("protocol_budget_profile", "standard")
+    if not isinstance(budget_profile, str) or budget_profile not in PROTOCOL_TOOL_BUDGETS:
+        raise ValueError("unknown protocol budget profile")
+    if mode != "protocol" and budget_profile != "standard":
+        raise ValueError("protocol budget profile is not valid for this mode")
     if mode == "capability_smoke":
         probe = values.get("probe")
         if probe not in ("help", "version"):
@@ -142,13 +148,16 @@ def render_argv(mode: str, **values: object) -> list[str]:
         ticket = str(values["ticket"])
         if re.fullmatch(r"[A-Za-z0-9._/-]+", ticket) is None:
             raise ValueError("invalid ticket")
+        if budget_profile == "pilot-expanded" and ticket.replace("\\", "/").rsplit("/", 1)[-1] != "qwen-protocol-pilot-ticket.md":
+            raise ValueError("expanded protocol budget is restricted to the disposable pilot ticket")
         limits = contract["limits"]
         assert isinstance(limits, dict)
         return [
             "--max-session-turns", str(limits["max_session_turns"]),
-            "--max-tool-calls", str(limits["max_tool_calls"]),
+            "--max-tool-calls", str(PROTOCOL_TOOL_BUDGETS[str(budget_profile)]),
             "--max-wall-time", str(limits["max_wall_time"]),
             "--max-subagent-depth", str(limits["max_subagent_depth"]),
+            "--output-format", "stream-json",
             "--prompt", f"/finish-ticket ticket {ticket}",
         ]
     if mode == "native_recon":
@@ -203,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--contract", action="store_true")
     parser.add_argument("--probe", choices=("help", "version"))
     parser.add_argument("--ticket")
+    parser.add_argument("--protocol-budget-profile", choices=sorted(PROTOCOL_TOOL_BUDGETS), default="standard")
     parser.add_argument("--prompt")
     parser.add_argument("--schema-path")
     parser.add_argument("--worktree")

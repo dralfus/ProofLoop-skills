@@ -10,7 +10,7 @@
 - `docs/decisions.md`;
 - `docs/codex-task-lifecycle.md`.
 
-Исполняемый протокол версии `1.3` находится в
+Исполняемый протокол версии `1.14` находится в
 `plugins/agentic-development-workflow/skills/finish-ticket/references/task-lifecycle.md`.
 При изменении ролей, health gates или acceptance authority обновляйте прежде
 всего его, а человеческие документы и plugin — согласованно.

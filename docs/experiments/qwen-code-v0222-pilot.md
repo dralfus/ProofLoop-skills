@@ -1,11 +1,12 @@
 # Native Qwen Code `$finish-ticket` pilot
 
-Статус: `NOT_RUN` для полного native role-lifecycle pilot.
+Статус: успешный полный native role-lifecycle pilot пока не доказан; см. свежий
+статус bounded attempts в `../current-state.md`.
 
 Этот документ — воспроизводимая процедура реального pilot, а не
 синтетическое live evidence. Владелец подтвердил, что Qwen CLI установлен и
-отвечает. Полный pilot с Implementer continuation, независимым Reviewer,
-Verifier и terminal verdict ещё не выполнялся. Предыдущее наблюдение
+отвечает. Предыдущий recon-only этап не включал Implementer continuation,
+независимого Reviewer, Verifier или terminal verdict. Предыдущее наблюдение
 `QWEN_CLI=ABSENT` относилось к более ранней проверке и не описывает текущую
 доступность CLI.
 
@@ -14,10 +15,10 @@ Verifier и terminal verdict ещё не выполнялся. Предыдущ�
 1. Зафиксировать доступные capabilities установленного CLI через ProofLoop
    capability preflight; версия сохраняется как evidence, но не служит
    allow-list.
-2. Из корня этого репозитория установить или обновить extension:
-   `qwen extensions install .`.
-3. В Qwen открыть `/skills`, убедиться, что виден `finish-ticket`, и в
-   `/agents manage` — `finish-ticket-controller`.
+2. Проверить личный Skill в `~/.qwen/skills/finish-ticket/SKILL.md` и
+   frontmatter `name: finish-ticket`; запускать его как `/finish-ticket`.
+3. При необходимости отдельно проверить extension agent через `/agents manage`;
+   extension route не заменяет личный Skill.
 4. Выбрать один обычный ticket с воспроизводимым RED command и безопасным
    isolated worktree; не запускать live pilot до exact capability preflight.
 

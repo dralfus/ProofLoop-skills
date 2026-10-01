@@ -1,6 +1,6 @@
 # Спецификация: Qwen Code профиль сходящегося repair-loop
 
-Статус: реализовано; real pilot ожидает Qwen CLI
+Статус: реализовано локально; полный live role lifecycle не доказан
 
 ## Постановка проблемы
 
@@ -178,14 +178,16 @@ verification или stop gate.
 
 ## Дополнительные сведения
 
-Профиль проектируется по документированным возможностям Qwen Code v0.22.2:
+Исходный профиль проектировался по документированным возможностям Qwen Code
+v0.22.2. Этот release reference исторический, не является текущим version gate;
+решение D056 оставляет capabilities обязательными, а runtime version — только
+наблюдаемым evidence. Capability preflight обязателен, поскольку поддержка
 skills, fresh named subagents, continuation, tool restrictions, hooks и
-машиночитаемый event output. Capability preflight обязателен, поскольку версия
-Qwen Code обновляется и эти возможности не должны считаться вечными.
+машиночитаемого event output должна подтверждаться для фактического runtime.
 
 Реализация обновляет канонический lifecycle, Codex plugin/skill, native Qwen
 extension (`qwen-extension.json` + named Controller agent) и человеческие
 инструкции. Extension ссылается на единый protocol и не содержит его копии.
-Policy покрыта executable end-to-end fixtures; реальный ticket остаётся
-следующим шагом только при наличии Qwen Code v0.22.2 и фиксируется в
-`docs/experiments/qwen-code-v0222-pilot.md` без подстановки live evidence.
+Policy покрыта executable end-to-end fixtures. Исторический pilot
+`docs/experiments/qwen-code-v0222-pilot.md` сохраняет исходный runtime context;
+новый live pilot допускает любой Qwen Code release, прошедший capability gate.

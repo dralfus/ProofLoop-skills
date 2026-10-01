@@ -94,8 +94,9 @@ Reviewer сообщает `SPEC` и `CODE_QUALITY`. Verifier сообщает и
 - Aggregate reject без raw-free `FAILURE_PROJECTION` разрешает только один
   test-only diagnostic loop через targeted `TEST_PERMIT`; до projection нет
   repair, Verifier или full suite.
-- Qwen Code v0.22.2 допускается только после exact capability preflight:
-  одна configured identity, fresh named roles, continuation Implementer,
+- Qwen допускается только после version-agnostic capability preflight:
+  фактические runtime identity/capabilities, одна configured identity, fresh
+  named roles, continuation Implementer,
   read-only Reviewer без fork/write и executable verification. `QWEN_CONVERGENT`
   заменяет numeric repair cap append-only ledger: baseline несёт fixed point и
   open findings; local attempt — finding, RED/hypothesis/GREEN; repair candidate

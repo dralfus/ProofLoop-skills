@@ -7,6 +7,9 @@ param(
     [ValidateSet('protocol', 'recon')]
     [string]$Mode = 'protocol',
 
+    [ValidateSet('standard', 'pilot-expanded')]
+    [string]$ProtocolBudgetProfile = 'standard',
+
     [switch]$SafeMode,
 
     [string]$SettingsPath = (Join-Path $env:USERPROFILE '.qwen\settings.json'),
@@ -21,6 +24,8 @@ param(
 
     [string]$QwenCommand = 'qwen.cmd',
 
+    [switch]$ShowOutput,
+
     [string]$ContinuationEvidencePath,
 
     [ValidatePattern('^[A-Za-z0-9._/-]+$')]
@@ -32,6 +37,18 @@ $ErrorActionPreference = 'Stop'
 $script:LauncherClock = [Diagnostics.Stopwatch]::StartNew()
 $script:ModelRequestStarted = $false
 $script:RuntimeEvidence = $null
+$script:LaunchStage = 'PREFLIGHT'
+$script:AllowedRuntimeProjectionReasons = @(
+    'PROCESS_OBSERVATION_INVALID', 'LAUNCH_ID_INVALID', 'LAUNCH_ID_MISMATCH',
+    'EVENT_STREAM_INVALID', 'EVENT_STREAM_INCOMPLETE', 'EVENT_SCHEMA_UNKNOWN',
+    'SESSION_ID_INVALID', 'SESSION_START_MISSING', 'SESSION_END_INVALID',
+    'SESSION_END_MISSING', 'SESSION_END_NOT_FINAL', 'TERMINAL_RESULT_INVALID',
+    'TOOL_USE_INVALID', 'MESSAGE_ID_INVALID', 'TOOL_RESULT_MISSING',
+    'TOOL_RESULT_UNPAIRED', 'HOST_STOP_OFFSET_NOT_LINE_BOUNDARY',
+    'SESSION_END_PRECEDES_HOST_STOP', 'HOST_STOP_NOT_PROVEN',
+    'PROCESS_TERMINAL_UNPROVEN', 'LOOP_PATTERN_DETECTED',
+    'LOOP_EVIDENCE_UNKNOWN', 'NORMAL_EXIT_NOT_RESUMABLE', 'PROJECTION_FAILURE'
+)
 
 function Write-GuardStatus {
     param(
@@ -45,6 +62,10 @@ function Write-GuardStatus {
 
     $result = @{ status = $Status }
     $result.mode = $Mode
+    if ($Mode -eq 'protocol') {
+        $result.protocol_budget_profile = $ProtocolBudgetProfile
+        $result.effective_max_tool_calls = if ($ProtocolBudgetProfile -eq 'pilot-expanded') { 40 } else { 20 }
+    }
     $result.duration_ms = [long]$script:LauncherClock.ElapsedMilliseconds
     $reportedReason = if ($Reason) { $Reason } else { $Status }
     $result.terminal_reason = $reportedReason
@@ -116,6 +137,28 @@ function Write-GuardStatus {
             [int64]$RuntimeEvidence.wall_time_seconds -le 2147483647) {
             $result.wall_time_seconds = [int]$RuntimeEvidence.wall_time_seconds
         }
+        $partialObservationProperty = $RuntimeEvidence.PSObject.Properties['partial_observation']
+        if ($null -ne $partialObservationProperty -and $partialObservationProperty.Value -is [pscustomobject]) {
+            $partialObservation = [ordered]@{}
+            foreach ($field in @(
+                'event_lines_observed', 'assistant_turns_observed', 'tool_dispatches_observed',
+                'tool_results_observed', 'tool_errors_observed', 'agent_dispatches_observed'
+            )) {
+                $property = $partialObservationProperty.Value.PSObject.Properties[$field]
+                if ($null -ne $property -and $property.Value -is [ValueType] -and
+                    $property.Value -isnot [bool] -and [int64]$property.Value -ge 0 -and
+                    [int64]$property.Value -le 2147483647) {
+                    $partialObservation[$field] = [int]$property.Value
+                }
+            }
+            $terminalResultSeen = $partialObservationProperty.Value.PSObject.Properties['terminal_result_seen']
+            if ($null -ne $terminalResultSeen -and $terminalResultSeen.Value -is [bool]) {
+                $partialObservation.terminal_result_seen = [bool]$terminalResultSeen.Value
+            }
+            if ($partialObservation.Count -eq 7) {
+                $result.partial_observation = [pscustomobject]$partialObservation
+            }
+        }
         if ($null -ne $RuntimeEvidence.PSObject.Properties['tool_fingerprint'] -and
             $RuntimeEvidence.tool_fingerprint -is [string] -and
             $RuntimeEvidence.tool_fingerprint -match '^[0-9a-f]{64}$') {
@@ -138,9 +181,116 @@ function Write-GuardStatus {
             }
             if ($safeDiagnostic.Count -gt 0) { $result.diagnostic = $safeDiagnostic }
         }
+        $processOutputProperty = $RuntimeEvidence.PSObject.Properties['process_output_diagnostic']
+        if ($null -ne $processOutputProperty -and $processOutputProperty.Value -is [pscustomobject] -and
+            [string]$processOutputProperty.Value.capture_status -in @('PROJECTED', 'LIMIT_EXCEEDED', 'UNAVAILABLE')) {
+            $safeProcessOutput = [ordered]@{
+                capture_status = [string]$processOutputProperty.Value.capture_status
+                reason = if ([string]$processOutputProperty.Value.reason -in @('STRUCTURED_OUTPUT_MISSING', 'QWEN_JSON_ERROR_RESULT', 'QWEN_COMMAND_FAILED')) {
+                    [string]$processOutputProperty.Value.reason
+                } else { 'QWEN_COMMAND_FAILED' }
+            }
+            $sourceProcessDiagnostic = $processOutputProperty.Value.diagnostic
+            if ($sourceProcessDiagnostic -is [pscustomobject]) {
+                $safeProcessDiagnostic = [ordered]@{}
+                foreach ($field in @(
+                    'stdout_present', 'stderr_present', 'stdout_json', 'stderr_json',
+                    'terminal_result', 'terminal_is_error', 'error_message_present',
+                    'envelope_is_error', 'envelope_error_message_present'
+                )) {
+                    $property = $sourceProcessDiagnostic.PSObject.Properties[$field]
+                    if ($null -ne $property -and $property.Value -is [bool]) {
+                        $safeProcessDiagnostic[$field] = [bool]$property.Value
+                    }
+                }
+                foreach ($field in @(
+                    'structured_output_channel', 'json_shape', 'terminal_subtype',
+                    'error_message_category', 'envelope_subtype', 'envelope_error_message_category'
+                )) {
+                    $property = $sourceProcessDiagnostic.PSObject.Properties[$field]
+                    if ($null -ne $property -and $property.Value -is [string]) {
+                        $allowed = switch ($field) {
+                            'structured_output_channel' { @('none', 'stdout', 'stderr', 'stdout+stderr') }
+                            'json_shape' { @('none', 'object', 'array', 'other') }
+                            { $_ -in @('terminal_subtype', 'envelope_subtype') } { @('none', 'success', 'error_during_execution', 'other') }
+                            default { @('none', 'structured_output_missing', 'auth_or_forbidden', 'transport', 'other') }
+                        }
+                        if ([string]$property.Value -in $allowed) {
+                            $safeProcessDiagnostic[$field] = [string]$property.Value
+                        }
+                    }
+                }
+                $safeProcessOutput.diagnostic = $safeProcessDiagnostic
+            }
+            $result.process_output_diagnostic = [pscustomobject]$safeProcessOutput
+        }
+    }
+    if ($Mode -eq 'protocol' -and $script:ModelRequestStarted) {
+        $sourceLaunchDiagnostic = if ($RuntimeEvidence -and
+            $null -ne $RuntimeEvidence.PSObject.Properties['launch_diagnostic'] -and
+            $RuntimeEvidence.launch_diagnostic -is [pscustomobject]) {
+            $RuntimeEvidence.launch_diagnostic
+        }
+        else { $null }
+        $safeLaunchDiagnostic = [ordered]@{
+            schema_version = 2
+            outer_stage = if ($script:LaunchStage -in @('PREFLIGHT', 'CLI_DISPATCH', 'CLI_RETURNED', 'RUNTIME_EVIDENCE_PARSED', 'CLI_OUTPUT_INVALID', 'CLI_OUTPUT_MISSING', 'CLI_EXCEPTION')) { $script:LaunchStage } else { 'CLI_EXCEPTION' }
+            cli_stage = 'NOT_REACHED'
+            supervisor_stage = 'NOT_REACHED'
+            process_state = 'NOT_STARTED'
+            process_exit_code = $null
+            event_file_state = 'NOT_OBSERVED'
+            event_file_bytes = $null
+            console_output_mode = if ($ShowOutput) { 'VISIBLE' } else { 'SUPPRESSED' }
+        }
+        if ($null -ne $sourceLaunchDiagnostic) {
+            $supervisorStage = $sourceLaunchDiagnostic.PSObject.Properties['supervisor_stage']
+            if ($null -ne $supervisorStage -and [string]$supervisorStage.Value -in @(
+                'COMMAND_RESOLUTION', 'PROCESS_CREATION', 'CHILD_STARTED', 'PROCESS_EXITED',
+                'PROCESS_EXIT_UNCONFIRMED', 'COMMAND_RESOLUTION_FAILED', 'PROCESS_CREATION_FAILED',
+                'CHILD_MONITOR_FAILED'
+            )) { $safeLaunchDiagnostic.supervisor_stage = [string]$supervisorStage.Value }
+            $processState = $sourceLaunchDiagnostic.PSObject.Properties['process_state']
+            if ($null -ne $processState -and [string]$processState.Value -in @('NOT_STARTED', 'RUNNING', 'EXITED', 'UNKNOWN')) {
+                $safeLaunchDiagnostic.process_state = [string]$processState.Value
+            }
+            $processExitCode = $sourceLaunchDiagnostic.PSObject.Properties['process_exit_code']
+            if ($null -ne $processExitCode -and $processExitCode.Value -is [ValueType] -and
+                $processExitCode.Value -isnot [bool] -and [int64]$processExitCode.Value -ge -2147483648 -and
+                [int64]$processExitCode.Value -le 2147483647) {
+                $safeLaunchDiagnostic.process_exit_code = [int]$processExitCode.Value
+            }
+            $eventFileState = $sourceLaunchDiagnostic.PSObject.Properties['event_file_state']
+            if ($null -ne $eventFileState -and [string]$eventFileState.Value -in @('NOT_OBSERVED', 'MISSING', 'EMPTY', 'PRESENT', 'UNAVAILABLE')) {
+                $safeLaunchDiagnostic.event_file_state = [string]$eventFileState.Value
+            }
+            $eventFileBytes = $sourceLaunchDiagnostic.PSObject.Properties['event_file_bytes']
+            if ($null -ne $eventFileBytes -and $eventFileBytes.Value -is [ValueType] -and
+                $eventFileBytes.Value -isnot [bool] -and [int64]$eventFileBytes.Value -ge 0 -and
+                [int64]$eventFileBytes.Value -le 2147483647) {
+                $safeLaunchDiagnostic.event_file_bytes = [int]$eventFileBytes.Value
+            }
+            $consoleOutputMode = $sourceLaunchDiagnostic.PSObject.Properties['console_output_mode']
+            if ($null -ne $consoleOutputMode -and [string]$consoleOutputMode.Value -in @('SUPPRESSED', 'VISIBLE')) {
+                $safeLaunchDiagnostic.console_output_mode = [string]$consoleOutputMode.Value
+            }
+        }
+        $sourceCliStage = if ($RuntimeEvidence) { $RuntimeEvidence.PSObject.Properties['cli_failure_stage'] } else { $null }
+        if ($null -eq $sourceCliStage -and $RuntimeEvidence) { $sourceCliStage = $RuntimeEvidence.PSObject.Properties['cli_stage'] }
+        if ($null -ne $sourceCliStage -and [string]$sourceCliStage.Value -in @(
+            'ARGUMENT_CONTRACT', 'ARGUMENTS_VALIDATED', 'CAPTURE_SETUP', 'CAPTURE_READY',
+            'CREDENTIAL_HELPER_LOAD', 'CREDENTIAL_LOOKUP', 'CREDENTIAL_READY', 'SUPERVISOR_LOAD', 'SUPERVISOR_READY',
+            'SUPERVISOR_DISPATCH', 'SUPERVISOR_RETURNED', 'RUNTIME_PROJECTION', 'RUNTIME_PROJECTED'
+        )) { $safeLaunchDiagnostic.cli_stage = [string]$sourceCliStage.Value }
+        $result.launch_diagnostic = $safeLaunchDiagnostic
     }
     if ($Reason) {
         $result.reason = $reportedReason
+    }
+    if ($Status -eq 'BLOCKED_CAPABILITY' -and $RuntimeEvidence -and
+        $null -ne $RuntimeEvidence.PSObject.Properties['reason'] -and
+        [string]$RuntimeEvidence.reason -in $script:AllowedRuntimeProjectionReasons) {
+        $result.runtime_projection_reason = [string]$RuntimeEvidence.reason
     }
     if ($LaunchId) {
         $result.launch_id = $LaunchId
@@ -157,7 +307,7 @@ function Write-GuardStatus {
         $projectionPath = Join-Path $ReceiptDirectory "QWEN_TERMINAL_OUTCOME-$LaunchId.json"
         $temporaryProjectionPath = "$projectionPath.$([guid]::NewGuid().ToString('N')).tmp"
         $result.receipt_type = 'QWEN_TERMINAL_OUTCOME'
-        $result.receipt_version = 1
+        $result.receipt_version = 5
         $result.terminal_receipt_written = $true
         try {
             $projectionJson = $result | ConvertTo-Json -Compress -Depth 4
@@ -179,6 +329,34 @@ function Stop-Guard {
 
     Write-GuardStatus -Status 'BLOCKED_CAPABILITY' -Reason $Reason
     exit 3
+}
+
+function Test-PilotExpandedBudgetScope {
+    if ($ProtocolBudgetProfile -ne 'pilot-expanded') { return $true }
+    if ($Mode -ne 'protocol' -or (Split-Path -Leaf $Ticket) -cne 'qwen-protocol-pilot-ticket.md') { return $false }
+    $currentDirectory = [IO.Path]::GetFullPath((Get-Location).Path)
+    if ($currentDirectory -notmatch '[\\/]\.scratch[\\/]' -or
+        -not (Test-Path -LiteralPath (Join-Path $currentDirectory '.git'))) { return $false }
+    try {
+        $ticketPath = [IO.Path]::GetFullPath((Join-Path $currentDirectory ($Ticket.Replace('/', [IO.Path]::DirectorySeparatorChar))))
+        $ticketPrefix = $currentDirectory.TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)) + [IO.Path]::DirectorySeparatorChar
+        if (-not $ticketPath.StartsWith($ticketPrefix, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+        $ticketText = Get-Content -LiteralPath $ticketPath -Raw -ErrorAction Stop
+    }
+    catch { return $false }
+    foreach ($requiredMarker in @(
+        'This is a fresh owner-authorized experiment',
+        'It is a test-only slice related to Ticket 314',
+        'test_patch_candidate_rejects_changed_lines_over_200',
+        'Do not commit, transfer, broaden scope'
+    )) {
+        if ($ticketText -notlike "*$requiredMarker*") { return $false }
+    }
+    return $true
+}
+
+if (-not (Test-PilotExpandedBudgetScope)) {
+    Stop-Guard -Reason 'PILOT_BUDGET_SCOPE_REQUIRED'
 }
 
 function Write-QwenCreateNewFile {
@@ -288,11 +466,16 @@ function Invoke-QwenGuardPolicy {
 }
 
 function Get-QwenRegistryArguments {
-    param([Parameter(Mandatory)] [string]$Mode, [Parameter(Mandatory)] [string]$Ticket)
+    param(
+        [Parameter(Mandatory)] [string]$Mode,
+        [Parameter(Mandatory)] [string]$Ticket,
+        [string]$BudgetProfile = 'standard'
+    )
 
     try {
-        $rendered = & python (Join-Path $PSScriptRoot 'qwen_invocation_contract.py') `
-            '--mode' $Mode '--ticket' $Ticket 2>$null | Out-String
+        $contractArguments = @('--mode', $Mode, '--ticket', $Ticket)
+        if ($Mode -eq 'protocol') { $contractArguments += @('--protocol-budget-profile', $BudgetProfile) }
+        $rendered = & python (Join-Path $PSScriptRoot 'qwen_invocation_contract.py') @contractArguments 2>$null | Out-String
         $exitCode = if (Test-Path Variable:global:LASTEXITCODE) { [int]$global:LASTEXITCODE } else { 0 }
         if ($exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($rendered)) { Stop-Guard -Reason 'INVOCATION_CONTRACT_UNAVAILABLE' }
         $argv = @($rendered | ConvertFrom-Json)
@@ -444,6 +627,39 @@ if ($ContinuationEvidencePath -and $Mode -ne 'protocol') {
     Stop-Guard -Reason 'CONTINUATION_PROTOCOL_ONLY'
 }
 
+if ($Mode -eq 'protocol') {
+    $finishTicketSkillPath = Join-Path $env:USERPROFILE '.qwen\skills\finish-ticket\SKILL.md'
+    if (-not (Test-Path -LiteralPath $finishTicketSkillPath -PathType Leaf)) {
+        Stop-Guard -Reason 'PROOFLOOP_SKILL_MISSING'
+    }
+    try {
+        $skillText = Get-Content -LiteralPath $finishTicketSkillPath -Raw
+        $skillFrontmatter = [regex]::Match(
+            $skillText,
+            '\A---[ \t]*\r?\n(?<frontmatter>.*?)\r?\n---[ \t]*(?:\r?\n|\z)',
+            [Text.RegularExpressions.RegexOptions]::Singleline
+        )
+        if (-not $skillFrontmatter.Success -or
+            $skillFrontmatter.Groups['frontmatter'].Value -cnotmatch '(?m)^name:\s*finish-ticket\s*$') {
+            Stop-Guard -Reason 'PROOFLOOP_SKILL_INVALID'
+        }
+    }
+    catch {
+        Stop-Guard -Reason 'PROOFLOOP_SKILL_INVALID'
+    }
+}
+else {
+    try {
+        $extensionManifest = Get-Content -LiteralPath (Join-Path $ExtensionRoot 'qwen-extension.json') -Raw | ConvertFrom-Json
+    }
+    catch {
+        Stop-Guard -Reason 'PROOFLOOP_EXTENSION_MISSING'
+    }
+    if ($null -eq $extensionManifest.PSObject.Properties['name'] -or $extensionManifest.PSObject.Properties['name'].Value -cne 'proofloop-skills') {
+        Stop-Guard -Reason 'PROOFLOOP_EXTENSION_MISSING'
+    }
+}
+
 $reconFixedPoint = $null
 $resolvedReconSchemaPath = $null
 if ($Mode -eq 'recon') {
@@ -480,11 +696,12 @@ $requiredCliCapabilities = if ($Mode -eq 'recon') {
 else {
     @(
         '--prompt',
+        '--output-format',
+        'stream-json',
         '--max-session-turns',
         '--max-tool-calls',
         '--max-wall-time',
-        '--max-subagent-depth',
-        '--json-file'
+        '--max-subagent-depth'
     )
 }
 
@@ -571,16 +788,6 @@ if ($modePolicy.status -ne 'QWEN_MODE_READY') {
     exit 3
 }
 
-try {
-    $extensionManifest = Get-Content -LiteralPath (Join-Path $ExtensionRoot 'qwen-extension.json') -Raw | ConvertFrom-Json
-}
-catch {
-    Stop-Guard -Reason 'PROOFLOOP_EXTENSION_MISSING'
-}
-if ($null -eq $extensionManifest.PSObject.Properties['name'] -or $extensionManifest.PSObject.Properties['name'].Value -ne 'proofloop-skills') {
-    Stop-Guard -Reason 'PROOFLOOP_EXTENSION_MISSING'
-}
-
 $limits = if ($Mode -eq 'recon') {
     [ordered]@{
         max_session_turns = 3
@@ -592,7 +799,7 @@ $limits = if ($Mode -eq 'recon') {
 else {
     [ordered]@{
         max_session_turns = 20
-        max_tool_calls = 20
+        max_tool_calls = if ($ProtocolBudgetProfile -eq 'pilot-expanded') { 40 } else { 20 }
         max_wall_time = '30m'
         max_subagent_depth = 1
     }
@@ -612,15 +819,15 @@ if ($Mode -eq 'recon') {
 }
 $receipt = [ordered]@{
     receipt_type = if ($Mode -eq 'recon') { 'QWEN_RECON_GUARD' } else { 'QWEN_SESSION_GUARD' }
-    receipt_version = 1
+    receipt_version = if ($Mode -eq 'protocol' -and $ProtocolBudgetProfile -eq 'pilot-expanded') { 2 } else { 1 }
     launch_id = $launchId
     issued_at_utc = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
     mode = $Mode
     limits = $limits
     loop_detection = $true
-    extension_available = $true
 }
 if ($Mode -eq 'recon') {
+    $receipt.extension_available = $true
     $receipt.ledger_id = $reconLedgerId
     $receipt.session_id = $reconSessionId
     $receipt.fresh_evidence_id = $reconFreshEvidenceId
@@ -631,6 +838,10 @@ if ($Mode -eq 'recon') {
     $receipt.structured_output = $true
     $receipt.worktree_clean = $true
     $receipt.fixed_point = $reconFixedPoint
+}
+else {
+    $receipt.finish_ticket_skill_available = $true
+    if ($ProtocolBudgetProfile -eq 'pilot-expanded') { $receipt.budget_profile = $ProtocolBudgetProfile }
 }
 
 try {
@@ -651,6 +862,7 @@ if ($Mode -eq 'recon') {
 $guardInput = [ordered]@{
     operation = 'guard_preflight'
     mode = $Mode
+    protocol_budget_profile = $ProtocolBudgetProfile
     now_utc = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
     max_receipt_age_seconds = 300
     settings = @{
@@ -672,9 +884,10 @@ if ($guardDecision.status -ne 'QWEN_GUARD_READY') {
 
 $cliCompatibilityConsumer = Join-Path $PSScriptRoot 'invoke_qwen_finish_ticket_cli.ps1'
 if ($Mode -eq 'protocol') {
-    $qwenArguments = @(Get-QwenRegistryArguments -Mode 'protocol' -Ticket $Ticket)
+    $qwenArguments = @(Get-QwenRegistryArguments -Mode 'protocol' -Ticket $Ticket -BudgetProfile $ProtocolBudgetProfile)
 	$continuationPacket = $null
 	$continuationPacketFile = $null
+	$continuationPacketDispatchReady = $false
 	if ($ContinuationEvidencePath) {
 		if (-not (Test-Path -LiteralPath $ContinuationEvidencePath -PathType Leaf)) {
 			Write-GuardStatus -Status 'BLOCKED_CAPABILITY' -Reason 'CONTROLLER_EVIDENCE_UNAVAILABLE' -LaunchId $launchId
@@ -708,7 +921,8 @@ if ($Mode -eq 'protocol') {
 				exit 3
 			}
 			$continuationPacket = [IO.File]::ReadAllText($continuationPacketFile, [Text.Encoding]::UTF8)
-			if ([string]::IsNullOrWhiteSpace($continuationPacket) -or $continuationPacket.Length -gt 32768) {
+			if ([string]::IsNullOrWhiteSpace($continuationPacket) -or
+				[Text.Encoding]::UTF8.GetByteCount($continuationPacket) -gt 14000) {
 				Write-GuardStatus -Status 'BLOCKED_CAPABILITY' -Reason 'CONTROLLER_EVIDENCE_MALFORMED' -LaunchId $launchId
 				exit 3
 			}
@@ -741,13 +955,14 @@ if ($Mode -eq 'protocol') {
 				Write-GuardStatus -Status 'BLOCKED_CAPABILITY' -Reason 'RUNTIME_LEDGER_WRITE_FAILED' -LaunchId $launchId
 				exit 3
 			}
+			$continuationPacketDispatchReady = $true
 		}
 	catch {
 		Write-GuardStatus -Status 'BLOCKED_CAPABILITY' -Reason 'CONTROLLER_EVIDENCE_INVALID' -LaunchId $launchId
 		exit 3
 		}
 		finally {
-			if ($continuationPacketFile -and (Test-Path -LiteralPath $continuationPacketFile -PathType Leaf)) {
+			if (-not $continuationPacketDispatchReady -and $continuationPacketFile -and (Test-Path -LiteralPath $continuationPacketFile -PathType Leaf)) {
 				Remove-Item -LiteralPath $continuationPacketFile -Force -ErrorAction SilentlyContinue
 			}
 	}
@@ -756,21 +971,51 @@ if ($Mode -eq 'protocol') {
     try {
         $qwenExitCode = 0
         $script:ModelRequestStarted = $true
-        $outputTokenLimit = [int]$modePolicy.process_environment.QWEN_CODE_MAX_OUTPUT_TOKENS
-        $cliOutput = & $cliCompatibilityConsumer -Mode protocol -QwenCommand $QwenCommand `
-            -LaunchId $launchId `
-            -QwenArgumentsJson ($qwenArguments | ConvertTo-Json -Compress) -OutputTokenLimit $outputTokenLimit `
-            -ContinuationPacket $continuationPacket -CredentialTarget $CredentialTarget 2>$null | Out-String
+        $script:LaunchStage = 'CLI_DISPATCH'
+        # Isolate Credential Manager interop from the parent runspace. Pass a
+        # validated continuation packet by path so it cannot exceed the Windows
+        # process command-line limit.
+        $cliHostExecutable = (Get-Process -Id $PID -ErrorAction Stop).Path
+        $cliHostArguments = @(
+            '-NoLogo', '-NoProfile', '-File', $cliCompatibilityConsumer,
+            '-Mode', 'protocol',
+            '-ProtocolBudgetProfile', $ProtocolBudgetProfile,
+            '-QwenCommand', $QwenCommand,
+            '-LaunchId', $launchId,
+            '-QwenArgumentsJson', ($qwenArguments | ConvertTo-Json -Compress),
+            '-CredentialTarget', $CredentialTarget
+        )
+        if ($continuationPacketDispatchReady) {
+            $cliHostArguments += @('-ContinuationPacketPath', $continuationPacketFile)
+        }
+        if ($ShowOutput) { $cliHostArguments += '-ShowOutput' }
+        $cliOutput = & $cliHostExecutable @cliHostArguments 2>$null | Out-String
+        $script:LaunchStage = 'CLI_RETURNED'
         if (Test-Path Variable:global:LASTEXITCODE) {
             $qwenExitCode = $global:LASTEXITCODE
         }
         if (-not [string]::IsNullOrWhiteSpace($cliOutput)) {
-            try { $script:RuntimeEvidence = $cliOutput.Trim() | ConvertFrom-Json } catch { $script:RuntimeEvidence = $null }
+            try {
+                $script:RuntimeEvidence = $cliOutput.Trim() | ConvertFrom-Json
+                $script:LaunchStage = if ($null -ne $script:RuntimeEvidence) { 'RUNTIME_EVIDENCE_PARSED' } else { 'CLI_OUTPUT_INVALID' }
+            }
+            catch {
+                $script:RuntimeEvidence = $null
+                $script:LaunchStage = 'CLI_OUTPUT_INVALID'
+            }
         }
+        else { $script:LaunchStage = 'CLI_OUTPUT_MISSING' }
     }
     catch {
+        $script:LaunchStage = 'CLI_EXCEPTION'
         Write-GuardStatus -Status 'QWEN_COMMAND_FAILED' -Reason 'QWEN_COMMAND_UNAVAILABLE' -LaunchId $launchId -RuntimeEvidence $script:RuntimeEvidence -PersistTerminalOutcome
         exit 4
+    }
+    finally {
+        if ($continuationPacketDispatchReady -and $continuationPacketFile -and
+            (Test-Path -LiteralPath $continuationPacketFile -PathType Leaf)) {
+            Remove-Item -LiteralPath $continuationPacketFile -Force -ErrorAction SilentlyContinue
+        }
     }
 
     if ($qwenExitCode -ne 0) {
